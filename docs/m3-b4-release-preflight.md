@@ -1,5 +1,7 @@
 # 1.1.0b4 安装包与原 HA 备份、预检
 
+范围更新：`b4` 保留为双后端实验升级包及历史验证产物，不作为最终单网关贡献版本。后续按[单网关复用与贡献计划](plans/reusable-fan-single-gateway-contribution-plan.md)收敛；本文的备份和预检证据仍保留，不表示现在可以按旧方案部署第二网关。
+
 `1.1.0b4` 已包含书房风扇的两处方向修复：厂家适配器的 `verticalswing` 和组合卡片的 `switch1`。旧 `b3` 包保留。正式产物位于 `tools/dist/m3-b4-final/`，脱敏证据见 [m3-b4-verification.json](../experiments/openharmony_bridge/m3-b4-verification.json)。本轮没有安装、停止或重启原 HA。
 
 ## 安装包

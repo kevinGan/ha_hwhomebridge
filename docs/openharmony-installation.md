@@ -1,5 +1,7 @@
 # M3：保留式安装包、备份和预检
 
+本文记录实验后端的保留式安装工具及历史验证，不是最终单网关版本的安装指南。用户最终要求已明确为复用原集成、只保留一个网关，实施以[单网关复用与贡献计划](plans/reusable-fan-single-gateway-contribution-plan.md)为准，暂不执行旧的第二网关迁入方案。
+
 本工具只升级已有 hwhomebridge 组件。它不安装全新旧 SDK，不启动或停止 HA，不启用 OpenHarmony，不调用设备服务，也不迁移配对身份。默认动作是 `preflight`。原 HA 的现有 File editor 文件读取已验证，详见[生产只读预检](production-readonly-preflight.md)；系统命令通道、原权限及停机维护条件尚未验证，当前不得执行生产安装。
 
 当前包已包含书房风扇的方向修复，版本为 `1.1.0b4`。本轮新包验证和原 HA 在线备份见 [b4 发布与预检记录](m3-b4-release-preflight.md)；原 M3 的真实双 SDK 启动验收记录对应 `b3`，两个版本的 C 程序相同。
