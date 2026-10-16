@@ -227,7 +227,8 @@ class FrameworkTests(unittest.TestCase):
             data = original();data[self.client.roles['fan']]['attributes']['percentage'] = 37 if len(reads) < 4 else 25
             reads.append(1);return data
         self.client.states = states;self.router.fan_settle_seconds = 2;ticks = count(0, .1)
-        with patch(framework.__name__ + '.router.time.monotonic', side_effect=lambda: next(ticks)), patch(framework.__name__ + '.router.time.sleep'):
+        shared_router = framework.__name__.rsplit('.', 1)[0] + '.capability_router'
+        with patch(shared_router + '.time.monotonic', side_effect=lambda: next(ticks)), patch(shared_router + '.time.sleep'):
             with self.assertRaises(TimeoutError): self.router.write('timer-controls', 'fan', {'gear': 2})
     def test_http_read_only_and_duplicate_keys(self):
         server = transports.make_server(self.router, 0, read_only=True)
