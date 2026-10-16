@@ -142,6 +142,30 @@ class FrameworkTests(unittest.TestCase):
         for on in (0, 1):
             self.assertEqual(self.router.write('timer-controls', 'verticalswing', {'verticalswing': on})['verticalswing']['verticalswing'], on)
             self.assertEqual(self.router.write('aux', 'switch2', {'on': on})['switch2']['on'], on)
+    def test_sflt11_physical_reverse_reports_on_for_ha_forward(self):
+        # 用户实测该型号的 HA 方向与物理正反转相反；外部状态回报也必须校正。
+        for ha_direction, physical_reverse in (('forward', 1), ('reverse', 0)):
+            self.client.data[self.client.roles['fan']]['attributes']['direction'] = ha_direction
+            rebuilt, _, _ = make_router(self.instance, transport=self.client)
+            for router in (self.router, rebuilt):
+                self.assertEqual(router.snapshot('aux')['switch1']['on'], physical_reverse)
+                self.assertEqual(router.snapshot('timer-controls')['verticalswing']['verticalswing'], physical_reverse)
+        self.assertEqual(self.client.calls, [])
+
+    def test_sflt11_reverse_commands_agree_across_cards(self):
+        self.router.set_write_policy('fan_only')
+        for key, sid, field in (('aux', 'switch1', 'on'), ('timer-controls', 'verticalswing', 'verticalswing')):
+            for physical_reverse, ha_direction in ((1, 'forward'), (0, 'reverse')):
+                self.router.write(key, sid, {field: physical_reverse})
+                self.assertEqual(self.client.calls[-1], {'domain': 'fan', 'action': 'set_direction',
+                    'entity': self.client.roles['fan'], 'values': {'direction': ha_direction}})
+                self.assertEqual(self.router.snapshot('aux')['switch1']['on'], physical_reverse)
+                self.assertEqual(self.router.snapshot('timer-controls')['verticalswing']['verticalswing'], physical_reverse)
+
+    def test_standard_direction_is_not_inverted_for_other_models(self):
+        standard = self.router.registry.merge(self.router.registry.get_product('2NAL'))
+        self.assertEqual(standard.services['verticalswing'].ha_mapping.value_mapping.mapping_dict,
+                         {'0': 'forward', '1': 'reverse'})
     def test_independent_native_timers_and_reconstruction(self):
         self.router.write('timer-controls', 'countdownht', {'Equipmentname': 1, 'timeing': 30, 'countdownht': 1})
         self.router.write('timer-controls', 'countdownht', {'Equipmentname': 2, 'timeing': 60, 'countdownht': 1})

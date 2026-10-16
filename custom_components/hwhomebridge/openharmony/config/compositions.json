@@ -50,8 +50,8 @@
             "value_mapping": {
               "type": "enum_to_number",
               "mapping": {
-                "0": "forward",
-                "1": "reverse"
+                "0": "reverse",
+                "1": "forward"
               }
             }
           },
