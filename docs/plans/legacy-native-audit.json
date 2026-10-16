@@ -23,6 +23,12 @@
       ],
       "missing_legacy_exports": [],
       "unreviewed_exports": [],
+      "sdk_adapter_hooks": {
+        "HilinkGetBrgDevInfo": "absent_from_dynsym",
+        "HilinkGetBrgSvcInfo": "absent_from_dynsym",
+        "HilinkPutBrgDevCharState": "absent_from_dynsym",
+        "HilinkGetBrgDevCharState": "absent_from_dynsym"
+      },
       "abi_classification": "legacy_callbacks_only"
     },
     {
@@ -46,6 +52,12 @@
       ],
       "missing_legacy_exports": [],
       "unreviewed_exports": [],
+      "sdk_adapter_hooks": {
+        "HilinkGetBrgDevInfo": "absent_from_dynsym",
+        "HilinkGetBrgSvcInfo": "absent_from_dynsym",
+        "HilinkPutBrgDevCharState": "absent_from_dynsym",
+        "HilinkGetBrgDevCharState": "absent_from_dynsym"
+      },
       "abi_classification": "legacy_callbacks_only"
     }
   ],

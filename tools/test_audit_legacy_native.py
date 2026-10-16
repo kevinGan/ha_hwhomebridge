@@ -22,6 +22,8 @@ class LegacyNativeAuditTests(unittest.TestCase):
             with self.subTest(architecture=library["architecture"]):
                 self.assertEqual(set(library["exports"]), LEGACY_EXPORTS)
                 self.assertFalse(library["has_static_symbol_table"])
+                self.assertTrue(all(value == "absent_from_dynsym"
+                                    for value in library["sdk_adapter_hooks"].values()))
 
     def test_wrong_architecture_rejected(self):
         with self.assertRaisesRegex(ValueError, "architecture mismatch"):

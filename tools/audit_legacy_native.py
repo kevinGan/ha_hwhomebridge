@@ -5,9 +5,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from elftools.elf.elffile import ELFFile
-
-
 LEGACY_EXPORTS = frozenset({
     "exit_brg", "main", "GetGatewaySN", "HILINK_SetAutoAc",
     "HILINK_SetPreferredIface", "HILINK_GetDevStatus",
@@ -15,10 +12,16 @@ LEGACY_EXPORTS = frozenset({
     "HilinkSyncBrgDevStatus", "UpdateHAStatus",
 })
 EXPECTED_MACHINES = {"amd64": "EM_X86_64", "aarch64": "EM_AARCH64"}
+SDK_ADAPTER_HOOKS = (
+    "HilinkGetBrgDevInfo", "HilinkGetBrgSvcInfo",
+    "HilinkPutBrgDevCharState", "HilinkGetBrgDevCharState",
+)
 
 
 def inspect_library(path, architecture):
     """仅公开符号名和文件元数据，不输出数据段或内置凭据。"""
+    from elftools.elf.elffile import ELFFile
+
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
         stream.seek(0)
@@ -38,6 +41,14 @@ def inspect_library(path, architecture):
         }
         missing = sorted(LEGACY_EXPORTS - exports)
         extra = sorted(exports - LEGACY_EXPORTS)
+        imports = {symbol.name for symbol in table.iter_symbols()
+                   if symbol["st_shndx"] == "SHN_UNDEF"}
+        hooks = dict.fromkeys(SDK_ADAPTER_HOOKS, "absent_from_dynsym")
+        for name in SDK_ADAPTER_HOOKS:
+            if name in exports:
+                hooks[name] = "exported"
+            elif name in imports:
+                hooks[name] = "imported"
         return {
             "architecture": architecture,
             "machine": elf["e_machine"],
@@ -47,6 +58,7 @@ def inspect_library(path, architecture):
             "exports": sorted(exports),
             "missing_legacy_exports": missing,
             "unreviewed_exports": extra,
+            "sdk_adapter_hooks": hooks,
             "abi_classification": "legacy_callbacks_only" if not missing and not extra else "needs_review",
         }
 
