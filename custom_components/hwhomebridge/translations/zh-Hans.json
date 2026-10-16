@@ -3,12 +3,25 @@
     "step": {
       "user": {
         "title": "HuaweiHome Bridge",
-        "description": "欢迎使用HuaweiHome Bridge！\n\n此集成帮您将Home Assistant设备接入到华为智慧生活，让您可以通过华为智慧生活APP或语音助手控制设备。\n\n**功能说明：**\n- 将HA设备接入到华为智慧生活\n- 支持远程控制、语音控制\n- 支持多种设备类型\n- 在集成页面显示已接入的设备\n- 支持禁用/启用单个设备的桥接\n\n**使用步骤：**\n\n1.完成此配置后，网关将自动启动\n\n2.点击\"配置\"按钮获取PIN码\n\n3.在华为智慧生活APP中输入PIN码完成绑定\n\n4.绑定成功后，已匹配的设备将自动接入华为智慧生活\n\n5.在集成页面可查看已接入的设备，点击设备齿轮图标可禁用/启用\n\n---\n\n点击下方\"提交\"按钮完成集成配置",
-        "data": {}
+        "description": "选择桥接后端。原有配置默认保留旧 HiLink 后端；OpenHarmony 需单独准备隔离目录。选择停用不会启动网关。",
+        "data": {
+          "backend": "桥接后端"
+        }
+      },
+      "openharmony": {
+        "title": "OpenHarmony 独立后端",
+        "description": "填写 HA 配置目录下的独立目录，不填 token。目录须包含已校验程序、产品资料、实体映射及独立配对文件。此步骤只检查，不会启动或改写配对。",
+        "data": {
+          "openharmony_directory": "独立目录"
+        }
       }
     },
     "abort": {
-      "single_instance_allowed": "此集成仅支持配置一个实例"
+      "single_instance_allowed": "此集成仅支持配置一个实例",
+      "invalid_backend": "未知后端，请重新选择。"
+    },
+    "error": {
+      "invalid_openharmony_directory": "独立目录校验失败，请检查路径、权限、程序哈希、profile 和设备身份。"
     }
   },
   "options": {
@@ -29,6 +42,20 @@
         "data": {
           "devices": "已接入设备"
         }
+      },
+      "backend": {
+        "title": "桥接后端 / 启用与回退",
+        "description": "当前运行：{active_backend}；已保存选择：{selected_backend}。\n\nlegacy：原有 HiLink；openharmony：独立 OpenHarmony；disabled：停用。切换会停止当前 OpenHarmony，但保留配对文件。旧 SDK 已在当前进程启动时，切换需重启 HA；失败不会自动启动另一后端。",
+        "data": {
+          "backend": "桥接后端"
+        }
+      },
+      "openharmony": {
+        "title": "OpenHarmony 独立后端",
+        "description": "填写 HA 配置目录下的独立目录，不填 token。目录须包含已校验程序、产品资料、实体映射及独立配对文件。此步骤只检查，不会启动或改写配对。",
+        "data": {
+          "openharmony_directory": "独立目录"
+        }
       }
     },
     "progress": {
@@ -37,7 +64,12 @@
     "abort": {
       "pin_expired": "PIN码已过期，请重新配置",
       "internal_error": "内部错误，请重试",
-      "integration_not_init": "集成正在启动中，请稍后再试"
+      "integration_not_init": "集成正在启动中，请稍后再试",
+      "invalid_backend": "未知后端，请重新选择。",
+      "legacy_only": "此功能仅适用于旧 HiLink 后端。"
+    },
+    "error": {
+      "invalid_openharmony_directory": "独立目录校验失败，请检查路径、权限、程序哈希、profile 和设备身份。"
     }
   },
   "notify": {

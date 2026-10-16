@@ -1,0 +1,80 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HuaweiHome Bridge",
+        "description": "Choose a bridge backend. Existing entries retain legacy HiLink. OpenHarmony requires a prepared isolated directory. Disabled starts no gateway.",
+        "data": {
+          "backend": "Bridge backend"
+        }
+      },
+      "openharmony": {
+        "title": "Isolated OpenHarmony backend",
+        "description": "Enter the isolated directory relative to HA configuration. No REST token is needed. Prepared executable, profiles, entity mappings and independent pairing files are required. This step validates only.",
+        "data": {
+          "openharmony_directory": "Isolated directory"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only a single instance of this integration is allowed",
+      "invalid_backend": "Unknown backend. Choose again."
+    },
+    "error": {
+      "invalid_openharmony_directory": "Invalid isolated directory. Check paths, permissions, binary hash, profiles and device identities."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Select Function",
+        "description": "Please select a function",
+        "data": {
+          "action": "Function"
+        }
+      },
+      "show_pin": {
+        "title": "Gateway Binding Setup"
+      },
+      "select_device": {
+        "title": "Device Management",
+        "description": "{device_count} device(s) connected. Check to bridge a device, uncheck to remove it.",
+        "data": {
+          "devices": "Bridged Devices"
+        }
+      },
+      "backend": {
+        "title": "Bridge backend / enable and rollback",
+        "description": "Active: {active_backend}; saved selection: {selected_backend}.\n\nlegacy: original HiLink; openharmony: isolated backend; disabled: stopped. OpenHarmony stops without deleting pairing. Switching away from a resident legacy SDK requires an HA restart. Failures never start another backend automatically.",
+        "data": {
+          "backend": "Bridge backend"
+        }
+      },
+      "openharmony": {
+        "title": "Isolated OpenHarmony backend",
+        "description": "Enter the isolated directory relative to HA configuration. No REST token is needed. Prepared executable, profiles, entity mappings and independent pairing files are required. This step validates only.",
+        "data": {
+          "openharmony_directory": "Isolated directory"
+        }
+      }
+    },
+    "progress": {
+      "wait_for_binding": "Please enter the following PIN code in Huawei Smart Life app to complete binding\n\n### 🔐 PIN Code: **{pin_code}**\n\n⏰ Valid for: **{time_out} minutes**\n\n---\n\n**Binding Steps:**\n\n1.Open Huawei Smart Life app\n\n2.Tap '+' → Add Device\n\n3.Select 'Gateway' → Enter PIN code\n\n4.Input the PIN shown above\n\n5.Wait for binding success\n\n---\n\n**Important Notes:**\n\n-Please complete binding within **{time_out} minutes**\n\n-PIN code expires after timeout, please reconfigure"
+    },
+    "abort": {
+      "pin_expired": "PIN code has expired, please reconfigure",
+      "internal_error": "Internal error, please try again",
+      "integration_not_init": "Integration is starting up, please try again later",
+      "invalid_backend": "Unknown backend. Choose again.",
+      "legacy_only": "This action is available only for the legacy HiLink backend."
+    },
+    "error": {
+      "invalid_openharmony_directory": "Invalid isolated directory. Check paths, permissions, binary hash, profiles and device identities."
+    }
+  },
+  "notify": {
+    "restart_title": "Please restart Home Assistant",
+    "restart_message": "HuaweiHome Bridge has been removed. If you want to re-add this integration, please restart Home Assistant first, otherwise the integration will not work properly."
+  },
+  "title": "HuaweiHome Bridge"
+}

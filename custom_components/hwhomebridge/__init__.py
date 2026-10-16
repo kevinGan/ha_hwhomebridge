@@ -4,34 +4,89 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN
-from .hwbridge import start_hw_hilink_bridge, nullify_hilink_callbacks
+from .const import (DOMAIN, BACKEND_LEGACY, BACKEND_OPENHARMONY, BACKEND_DISABLED,
+                    CONF_OH_DIRECTORY, configured_backend)
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict):
-    """Set up the hwhomebridge component.
-
-    Called by HA for both YAML and config_flow setups.
-    Starts the HiLink bridge.
-    """
-    _LOGGER.info("async_setup called, starting hwhomebridge integration")
+    """准备组件；配置流确认后才启动选定后端，保留显式 YAML 旧入口。"""
+    _LOGGER.info("Preparing hwhomebridge integration")
     hass.data.setdefault(DOMAIN, {})
-    await start_hw_hilink_bridge(hass)
+    # 配置流加载组件时不提前启动旧库；显式 YAML 入口保留旧行为。
+    if DOMAIN in config and not hass.config_entries.async_entries(DOMAIN):
+        await _start_legacy_once(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Set up hwhomebridge from a config entry.
+    """按明确保存的后端启动；旧条目默认使用原 HiLink。"""
+    data = hass.data.setdefault(DOMAIN, {})
+    try:
+        mode = configured_backend(entry)
+    except ValueError as error:
+        raise ConfigEntryNotReady("Unknown bridge backend; select a backend explicitly") from error
+    if mode != BACKEND_LEGACY and data.get("legacy_attempted"):
+        raise ConfigEntryNotReady("Legacy SDK is resident; restart Home Assistant to switch backend")
+    runtime = None
+    if mode == BACKEND_OPENHARMONY:
+        from .openharmony.deployment import load_deployment
+        from .openharmony.ha_backend import HAOpenHarmonyBackend
+        directory = entry.options.get(CONF_OH_DIRECTORY, entry.data.get(CONF_OH_DIRECTORY, ""))
+        try:
+            spec = await hass.async_add_executor_job(load_deployment, hass.config.config_dir, directory)
+            runtime = HAOpenHarmonyBackend(hass, spec)
+            runtime.relative_directory = directory
+            await runtime.start()
+        except (OSError, ValueError, KeyError, RuntimeError, TimeoutError) as error:
+            raise ConfigEntryNotReady("OpenHarmony not ready; check its isolated directory, entities and ports") from error
+    elif mode == BACKEND_LEGACY:
+        await _start_legacy_once(hass)
+        await _setup_legacy_entry(hass, entry)
+    data[entry.entry_id] = {"backend": mode, "runtime": runtime}
+    data["last_backend"] = mode
+    entry.async_on_unload(entry.add_update_listener(_backend_options_updated))
+    if runtime:
+        async def stop_on_shutdown(_event):
+            await runtime.stop()
+        entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop_on_shutdown))
+        runtime.watch(entry.entry_id)
+    return True
 
-    Bridged sub-devices are created dynamically by hwbridge.py as they
-    are registered to HiLink. If devices were already discovered and
-    registered during async_setup (before this function runs), their
-    device registry entries are created here retrospectively.
-    """
+
+async def _start_legacy_once(hass):
+    data = hass.data.setdefault(DOMAIN, {})
+    if not data.get("legacy_attempted"):
+        data["legacy_attempted"] = True
+        from .hwbridge import start_hw_hilink_bridge
+        await start_hw_hilink_bridge(hass)
+
+
+async def _backend_options_updated(hass, entry):
+    data = hass.data[DOMAIN]
+    current = data.get(entry.entry_id)
+    desired = configured_backend(entry)
+    if data.get("legacy_attempted") and desired != BACKEND_LEGACY:
+        from homeassistant.components import persistent_notification
+        persistent_notification.async_create(hass,
+            "后端选择已保存。旧后端无法在当前进程中完全卸载，请重启 Home Assistant 后应用新的选择。",
+            title="HuaweiHome Bridge：需要重启", notification_id="hwhomebridge_backend_restart")
+        return
+    if current is None:
+        if entry.disabled_by is None:
+            await hass.config_entries.async_reload(entry.entry_id)
+        return
+    directory = entry.options.get(CONF_OH_DIRECTORY, entry.data.get(CONF_OH_DIRECTORY))
+    if desired != current["backend"] or (desired == BACKEND_OPENHARMONY and directory != current["runtime"].relative_directory):
+        await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _setup_legacy_entry(hass, entry):
     from .hwbridge import service_router, _create_bridge_device_entry_async, register_hilink_callbacks
 
     # 重载集成时 async_unload_entry 已 nullify 回调，这里重新注册
@@ -57,8 +112,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Unload a config entry - nullify C callbacks to prevent core dump on shutdown."""
-    nullify_hilink_callbacks()
+    """停止自有 OpenHarmony 子进程，或按原方式置空旧库回调。"""
+    data = hass.data.setdefault(DOMAIN, {})
+    active = data.get(entry.entry_id)
+    if active and active["backend"] == BACKEND_OPENHARMONY:
+        await active["runtime"].stop()
+    elif active and active["backend"] == BACKEND_LEGACY:
+        from .hwbridge import nullify_hilink_callbacks
+        nullify_hilink_callbacks()
+    data.pop(entry.entry_id, None)
     return True
 
 
@@ -68,6 +130,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     HA 删除流程：先 async_unload_entry（移除实体状态，C 库仍存活），
     再 async_remove_entry（此时 C 库可用，exit_brg 可正常调用）。
     """
+    # OpenHarmony 删除配置只停止自有进程，绝不解绑或清理配对目录。
+    if hass.data.get(DOMAIN, {}).get("last_backend") != BACKEND_LEGACY:
+        return
     from .hwbridge import stop_hw_hilink_bridge
 
     # 根据语言选择通知文案
