@@ -137,7 +137,7 @@ def build(repo, output, builds):
     package_hash = digest(archive.read_bytes())
     write_json(output / "release.json", {**manifest, "archive_sha256": package_hash})
     sums = [f"{package_hash}  {archive.name}"]
-    for name in ("ha_upgrade.py", "ha_runtime_preflight.py"):
+    for name in ("ha_upgrade.py", "ha_runtime_preflight.py", "ha_production_readonly.py", "ha_online_backup.py"):
         data = Path(__file__).with_name(name).read_bytes()
         (output / name).write_bytes(data)
         (output / name).chmod(0o600)
