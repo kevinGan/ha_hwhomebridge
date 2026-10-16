@@ -1,6 +1,6 @@
 # M3：保留式安装包、备份和预检
 
-本工具只升级已有 hwhomebridge 组件。它不安装全新旧 SDK，不启动或停止 HA，不启用 OpenHarmony，不调用设备服务，也不迁移配对身份。默认动作是 `preflight`。生产 HA 暂未获得并验证系统文件通道，当前不得执行生产安装。
+本工具只升级已有 hwhomebridge 组件。它不安装全新旧 SDK，不启动或停止 HA，不启用 OpenHarmony，不调用设备服务，也不迁移配对身份。默认动作是 `preflight`。原 HA 的现有 File editor 文件读取已验证，详见[生产只读预检](production-readonly-preflight.md)；系统命令通道、原权限及停机维护条件尚未验证，当前不得执行生产安装。
 
 ## 安装包范围
 
@@ -81,7 +81,7 @@ python3 ha_upgrade.py restore --config /srv/ha-test/config \
 
 M3 的脱敏证据见 `experiments/openharmony_bridge/m3-verification.json`。验证基于独立 QEMU 全系统 x86_64 Linux 和真实 HA 镜像，旧闭源 SDK 使用新的未配对身份；不复制现有实验网关的配对状态，不连接原 HA 的控制服务。安装包的 ARM64 文件没有在本次 ARM64 HA 中执行。
 
-生产仍需补齐：可验证的 OS 文件通道与部署适配器、实际目标 CPU/UID/网卡/端口检查、生产冷备份，以及 M4 的排他身份交接和维护窗口。原 HA 的 token 仅完成版本和状态只读核对。此次不声称生产安装、智慧生活端新增验收、实体灯光控制或长期观察已完成。
+首次 M3 隔离验收时，生产仍缺 OS 文件通道与部署适配器、目标环境检查和生产冷备份。后续[生产只读预检](production-readonly-preflight.md)已确认实际CPU/网卡和 File editor 读取，并生成本地在线检查副本；系统命令通道、运行 UID/原权限、实际端口及生产冷备份仍未补齐。M4 的排他身份交接和维护窗口也未执行，不声称生产安装、智慧生活端新增验收、实体灯光控制或长期观察已完成。
 
 Jev 辅助将公开代码/静态程序归为打包项，将原 SDK/适配器归为保留项，将 KV/备份归为私密数据，并将缺失文件通道归为阻断项。实际路径、校验、备份和还原规则由确定性代码执行，没有运行时 AI 依赖。
 
