@@ -24,6 +24,8 @@ import aiofiles
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .fan_mapping import validate_fan_mapping
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -37,6 +39,8 @@ VALID_ACTION_DOMAIN_MAP = {
     "set_color_temp": ["light"],
     "set_color": ["light"],
     "set_speed": ["fan"],
+    "set_direction": ["fan"],
+    "set_fan_mode": ["fan"],
     "set_temperature": ["climate", "water_heater"],
     "press": ["button"],
     "set_option": ["select", "input_select"],
@@ -176,6 +180,7 @@ class HAMapping:
     stop_option: Optional[str] = None        # select域 turn_on_off off 时选择的选项（如 "停止"）
     on_command: Optional[dict] = None        # on=1 时的声明式控制覆盖（如触发 cooker 服务）
     default_mode: Optional[str] = None       # 默认模式（用于 cooker 等需要默认值的服务）
+    options: dict = field(default_factory=dict)  # 显式能力参数，厂家按完整字段覆盖
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +430,10 @@ class ProductRegistry:
             stop_option=mapping_data.get('stop_option'),
             on_command=mapping_data.get('on_command'),
             default_mode=mapping_data.get('default_mode'),
+            options=copy.deepcopy(mapping_data.get('options', {})),
         )
+
+        validate_fan_mapping(mapping)
 
         # 验证 action + domain
         if not validate_action_domain(mapping.action, mapping.domain):
@@ -627,7 +635,10 @@ class ProductRegistry:
             stop_option=override.get('stop_option', base.stop_option),
             on_command=override.get('on_command', base.on_command),
             default_mode=override.get('default_mode', base.default_mode),
+            options=copy.deepcopy(override.get('options', base.options)),
         )
+
+        validate_fan_mapping(mapping)
 
         # 验证合并后的 action + domain
         if not validate_action_domain(mapping.action, mapping.domain):

@@ -6,10 +6,11 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..product_registry import HAMapping, ProductRegistry, VALID_ACTION_DOMAIN_MAP
+from ..fan_mapping import validate_fan_mapping
 
 
 def unique_object(pairs):
@@ -46,7 +47,6 @@ def child_sn(parent, key):
 @dataclass
 class OpenHarmonyMapping(HAMapping):
     role: str = ""
-    options: dict = field(default_factory=dict)
 
 
 class OpenHarmonyRegistry(ProductRegistry):
@@ -87,8 +87,10 @@ class OpenHarmonyRegistry(ProductRegistry):
         base.action = action
         if base.value_mapping and base.value_mapping.mapping_type != "enum_to_number":
             raise ValueError("unsupported OpenHarmony value mapping")
-        return OpenHarmonyMapping(**vars(base), role=data.get("role", ""),
-                                  options=copy.deepcopy(data.get("options", {})))
+        result = OpenHarmonyMapping(**vars(base), role=data.get("role", ""))
+        # 扩展动作曾临时清空 action；恢复后同样使用公共风扇校验。
+        validate_fan_mapping(result)
+        return result
 
     def _merge_ha_mapping(self, base, override):
         # 与原三层合并一致：厂家按字段覆盖；options 作为一个完整字段覆盖。

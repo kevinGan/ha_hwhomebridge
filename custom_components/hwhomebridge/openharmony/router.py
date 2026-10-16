@@ -12,6 +12,7 @@ from ..product_matcher import DeviceInfo, ProductMatcher
 from ..service_action import ServiceActionDispatcher
 from ..service_router import ServiceRouter
 from ..virtual_device import ServiceEntry, VirtualDevice
+from ..fan_mapping import fan_command, fan_state, is_mapped_fan
 from .configuration import OpenHarmonyRegistry, child_sn, integer, read_json
 
 
@@ -203,6 +204,10 @@ class OpenHarmonyRouter(ServiceRouter):
             value = self.active(state)
         elif action == "set_effect":
             value = int(bool(self.active(state)) and state["attributes"].get(mapping.value_attr) == options["effect"])
+        elif is_mapped_fan(mapping):
+            value = fan_state(mapping, state["state"], state["attributes"])
+            if value is None:
+                return None
         else:
             value = state["state"] if mapping.value_attr == "state" else state["attributes"].get(mapping.value_attr)
             if value is None:
@@ -270,18 +275,8 @@ class OpenHarmonyRouter(ServiceRouter):
         elif action == "set_color_temp":
             self.transport.call(domain, "turn_on", entity, color_temp_kelvin=value)
         elif action in ("set_speed", "set_fan_mode", "set_direction"):
-            table = mapping.value_mapping.mapping_dict
-            if str(value) not in table:
-                raise ValueError("unsupported mapped value")
-            parameter = table[str(value)]
-            if action == "set_direction":
-                if parameter not in ("forward", "reverse"):
-                    raise ValueError("invalid direction mapping")
-                self.transport.call(domain, "set_direction", entity, direction=parameter)
-            elif options.get("ha_service") == "set_preset_mode":
-                self.transport.call(domain, "set_preset_mode", entity, preset_mode=parameter)
-            else:
-                self.transport.call(domain, "set_percentage", entity, percentage=integer(parameter, 1, 100))
+            service, values = fan_command(mapping, value)
+            self.transport.call(domain, service, entity, **values)
         elif action == "set_effect":
             if value:
                 self.transport.call(domain, "turn_on", entity, effect=options["effect"])

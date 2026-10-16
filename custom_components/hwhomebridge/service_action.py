@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from .product_registry import HAMapping, ServiceDef
+from .fan_mapping import fan_command, is_mapped_fan
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +60,20 @@ class ServiceActionDispatcher:
             return False
 
         action = mapping.action
+
+        # 显式风扇映射已经给出 HA 目标值，不能再套旧 speed * 4 转换。
+        if is_mapped_fan(mapping):
+            try:
+                if not self._hass or mapping.domain != "fan" or not entity_id.startswith("fan."):
+                    return False
+                if not isinstance(payload, dict) or len(payload) != 1:
+                    return False
+                service, data = fan_command(mapping, next(iter(payload.values())))
+                self._call_service_async("fan", service, entity_id, data)
+                return True
+            except (ValueError, TypeError):
+                _LOGGER.warning("Rejected unsupported mapped fan command for %s", entity_id)
+                return False
         
         # 应用值映射转换（如果定义）
         transformed_payload = self._apply_value_mapping(payload, mapping)
@@ -309,7 +324,7 @@ class ServiceActionDispatcher:
         return True
 
     def _handle_set_speed(self, entity_id: str, payload: dict) -> bool:
-        """处理速度设置（风扇）"""
+        """兼容未配置映射的旧风速动作；新产品走显式双向映射。"""
         if not self._hass:
             return False
 
