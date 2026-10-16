@@ -2,9 +2,11 @@
 
 本工具只升级已有 hwhomebridge 组件。它不安装全新旧 SDK，不启动或停止 HA，不启用 OpenHarmony，不调用设备服务，也不迁移配对身份。默认动作是 `preflight`。原 HA 的现有 File editor 文件读取已验证，详见[生产只读预检](production-readonly-preflight.md)；系统命令通道、原权限及停机维护条件尚未验证，当前不得执行生产安装。
 
+当前包已包含书房风扇的方向修复，版本为 `1.1.0b4`。本轮新包验证和原 HA 在线备份见 [b4 发布与预检记录](m3-b4-release-preflight.md)；原 M3 的真实双 SDK 启动验收记录对应 `b3`，两个版本的 C 程序相同。
+
 ## 安装包范围
 
-组件版本为 `1.1.0b3`，当前仅验过 HA Core `2026.10.1`，其他版本预检拒绝。包内带文件清单和 SHA256、构建来源，以及 x86_64/aarch64 静态 `bridge_poc` 与对应 `build-info.json`。静态程序来自 M2 的同一固定源码，M3 不修改 C 实现。ARM64 程序的本次验证只覆盖打包、架构和哈希，不代表本次在 ARM64 重跑了安装验收。
+组件版本为 `1.1.0b4`，当前仅验过 HA Core `2026.10.1`，其他版本预检拒绝。包内带文件清单和 SHA256、构建来源，以及 x86_64/aarch64 静态 `bridge_poc` 与对应 `build-info.json`。静态程序来自 M2 的同一固定源码，M3 不修改 C 实现。ARM64 程序的本次验证只覆盖打包、架构和哈希，不代表本次在 ARM64 重跑了安装验收。
 
 构建时只选择 Git 跟踪的公开组件代码、翻译、图标和 OpenHarmony 定义；不会递归打包 experiments。以下内容不装入升级包，安装时从目标原样保留：
 
@@ -41,7 +43,7 @@ python3 tools/ha_upgrade.py build \
 ```sh
 # 默认仅预检：实际目标镜像在无网络、只读临时容器中确认版本/CPU/UID/可读权限。
 python3 ha_upgrade.py --config /srv/ha-test/config \
-  --container ha-test --package hwhomebridge-1.1.0b3.zip --sha256 <可信SHA256>
+  --container ha-test --package hwhomebridge-1.1.0b4.zip --sha256 <可信SHA256>
 
 # 备份整个旧组件及完整 core.config_entries，权限0700/0600；确认备份完整性。
 python3 ha_upgrade.py backup --config /srv/ha-test/config \
@@ -49,7 +51,7 @@ python3 ha_upgrade.py backup --config /srv/ha-test/config \
 
 # 安装要求备份与当前组件、条目仍一致；不会启用条目或启动 HA。
 python3 ha_upgrade.py install --config /srv/ha-test/config \
-  --container ha-test --package hwhomebridge-1.1.0b3.zip --sha256 <可信SHA256> \
+  --container ha-test --package hwhomebridge-1.1.0b4.zip --sha256 <可信SHA256> \
   --backup /srv/ha-test-backups/before-m3
 ```
 

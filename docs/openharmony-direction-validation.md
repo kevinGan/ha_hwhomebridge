@@ -25,4 +25,4 @@
 
 App 补验在前述后端重新启用之后进行，覆盖恢复后的实际控制。本轮没有通过 App 操作 `aux` 卡片；它的双向读写由前述回环接口验证。Jev 辅助区分了真实 App 链路证据和后台 API 证据；软件链路验证不包含现场观察叶片旋转方向。
 
-脱敏结果见 [验收记录](../experiments/openharmony_bridge/direction-recovery-verification.json)。此前 M3 安装包未重新生成；本轮同步到实验网关的两份配置已经包含修复，不能据此认为旧归档包也已更新。
+脱敏结果见 [验收记录](../experiments/openharmony_bridge/direction-recovery-verification.json)。后续已将这两处修复打入 `1.1.0b4` 安装包，并完成独立 x86_64 安装、还原验证，详见 [b4 发布与预检记录](m3-b4-release-preflight.md)。旧 `b3` 归档保持不变。

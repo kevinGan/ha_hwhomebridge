@@ -1,5 +1,7 @@
 # 原 HA：M3 只读预检与生产备份准备
 
+下文保留首次只读检查的范围与结果。后续已生成包含正反转修复的 `1.1.0b4` 包，并创建、下载、校验了一份不停止 HA 的在线配置备份，见 [b4 发布与预检记录](m3-b4-release-preflight.md)。在线归档包含运行中的旧 SDK KV，不能当作停机冷备或配对交接快照；独立维护通道和原机运行条件仍待验证。
+
 2026-10-16 的本轮检查只读取现有服务和文件，不安装组件、不重启 HA、不修改插件设置、不启动 SSH/Samba、不调用设备服务。脱敏结果见 [m3-production-preflight.json](../experiments/openharmony_bridge/m3-production-preflight.json)。原始配置、在线副本和认证材料不提交 Git。
 
 ## 已打通的入口
