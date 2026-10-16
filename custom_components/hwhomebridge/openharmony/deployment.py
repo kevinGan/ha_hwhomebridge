@@ -22,6 +22,8 @@ class Deployment:
     port: int
     lan_port: int
     router: OpenHarmonyRouter
+    gateway_sn: str
+    write_policy: str
 
 
 def private_path(path, directory=False):
@@ -70,6 +72,8 @@ def load_deployment(config_directory, relative_directory):
         raise ValueError("native HA instance must not contain REST credentials")
     config_path = Path(__file__).parent / "config"
     router = asyncio.run(OpenHarmonyRouter.create(ScopedTransport(), config_path, instance))
+    policy = settings.get("write_policy", "fan_only")
+    router.set_write_policy(policy)
     expected = router.registry.catalog(router.devices)
     actual = read_json(runtime / "ha-children.local.json")
     if {row["key"]: row for row in actual} != {row["key"]: row for row in expected}:
@@ -105,4 +109,4 @@ def load_deployment(config_directory, relative_directory):
             identity = read_json(identity_path)
             if identity.get("sn") != child_sn(root["sn"], key) or identity.get("parent_sn") != root["sn"]:
                 raise ValueError("saved child identity mismatch")
-    return Deployment(directory, binary, gateway, runtime, interface, port, lan_port, router)
+    return Deployment(directory, binary, gateway, runtime, interface, port, lan_port, router, root["sn"], policy)

@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import threading
 
 from .transport import HomeAssistantTransport, make_server
@@ -26,16 +27,21 @@ class HAOpenHarmonyBackend:
         async def monitor():
             await self.process.wait()
             if not self.stopping:
-                _LOGGER.error("OpenHarmony C exited; reloading only the selected backend")
+                _LOGGER.error("OpenHarmony C exited (%s); reloading its entry only", self.process.returncode)
                 self.hass.async_create_task(self.hass.config_entries.async_reload(entry_id))
         self.watch_task = self.hass.async_create_background_task(monitor(), "OpenHarmony process monitor")
 
     async def start(self):
         spec = self.deployment
-        transport = HomeAssistantTransport(self.hass)
+        transport = HomeAssistantTransport(self.hass, writable=spec.router.write_entities)
         transport.bind({entity for roles in spec.router.roles.values() for entity in roles.values()})
         spec.router.transport = transport
         try:
+            # 先检查 LAN 端口，失败时不启动 C，也不影响现有桥接。
+            def check_lan_port():
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                    probe.bind(("0.0.0.0", spec.lan_port))
+            await self.hass.async_add_executor_job(check_lan_port)
             # 工作线程通过 HA 主循环查询状态；缺失实体时不启动 C。
             for key in spec.router.devices:
                 await self.hass.async_add_executor_job(spec.router.snapshot, key)

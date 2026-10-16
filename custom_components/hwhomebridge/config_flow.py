@@ -23,20 +23,25 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import (DOMAIN, CONF_BACKEND, CONF_OH_DIRECTORY, BACKEND_LEGACY,
-                    BACKEND_OPENHARMONY, BACKEND_DISABLED, BACKENDS, configured_backend)
+                    BACKEND_OPENHARMONY, BACKEND_DISABLED, CONF_BACKEND_TYPE,
+                    configured_backend, backend_type, legacy_entry_id)
 from .pin_manager import PINManager
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def backend_schema(default):
-    return vol.Schema({vol.Required(CONF_BACKEND, default=default): vol.In({
-        BACKEND_LEGACY: "原有 HiLink", BACKEND_OPENHARMONY: "OpenHarmony 独立后端", BACKEND_DISABLED: "停用"})})
+def backend_schema(default, kind=None):
+    choices = {BACKEND_LEGACY: "原有 HiLink", BACKEND_OPENHARMONY: "OpenHarmony 独立后端"}
+    if kind is not None:
+        choices = {kind: choices[kind], BACKEND_DISABLED: "停用"}
+    return vol.Schema({vol.Required(CONF_BACKEND, default=default): vol.In(choices)})
 
 
-async def validate_directory(hass, directory):
+async def validate_directory(hass, directory, entry_id=None):
+    from .backend_entries import check_openharmony_conflicts
     from .openharmony.deployment import load_deployment
-    await hass.async_add_executor_job(load_deployment, hass.config.config_dir, directory)
+    spec = await hass.async_add_executor_job(load_deployment, hass.config.config_dir, directory)
+    return check_openharmony_conflicts(hass, spec, entry_id)
 
 
 def directory_schema(default=".storage/hwhomebridge/openharmony/lab"):
@@ -59,20 +64,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         用户首次添加集成时显示功能说明和使用步骤，
         用户点击"提交"后完成配置，网关自动启动。
         """
-        await self.async_set_unique_id(DOMAIN)
-        self._abort_if_unique_id_configured()
         
         # 用户点击"提交"，创建配置条目
         if user_input is not None:
             backend = user_input.get(CONF_BACKEND, BACKEND_LEGACY)
-            if backend not in BACKENDS:
+            if backend not in (BACKEND_LEGACY, BACKEND_OPENHARMONY):
                 return self.async_abort(reason="invalid_backend")
             if backend == BACKEND_OPENHARMONY:
                 return await self.async_step_openharmony()
+            await self.async_set_unique_id(DOMAIN)
+            if legacy_entry_id(self.hass) is not None:
+                return self.async_abort(reason="already_configured")
+            self._abort_if_unique_id_configured()
             _LOGGER.info("Config flow completed, gateway will start")
             return self.async_create_entry(
                 title="Huawei HA Gateway",
-                data={CONF_BACKEND: backend}
+                data={CONF_BACKEND: backend, CONF_BACKEND_TYPE: backend}
             )
         
         # 显示欢迎页面（无输入框）
@@ -85,12 +92,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                await validate_directory(self.hass, user_input[CONF_OH_DIRECTORY])
+                identity = await validate_directory(self.hass, user_input[CONF_OH_DIRECTORY])
             except (OSError, ValueError, KeyError):
                 errors["base"] = "invalid_openharmony_directory"
             else:
-                return self.async_create_entry(title="Huawei HA Gateway", data={
-                    CONF_BACKEND: BACKEND_OPENHARMONY, CONF_OH_DIRECTORY: user_input[CONF_OH_DIRECTORY]})
+                await self.async_set_unique_id(identity)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title="OpenHarmony Gateway · 独立实例", data={
+                    CONF_BACKEND: BACKEND_OPENHARMONY, CONF_BACKEND_TYPE: BACKEND_OPENHARMONY,
+                    CONF_OH_DIRECTORY: user_input[CONF_OH_DIRECTORY]})
         return self.async_show_form(step_id="openharmony", data_schema=directory_schema(), errors=errors)
     
     @staticmethod
@@ -159,15 +169,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_backend(self, user_input=None):
         if user_input is not None:
             mode = user_input.get(CONF_BACKEND)
-            if mode not in BACKENDS:
+            if mode not in (backend_type(self.config_entry), BACKEND_DISABLED):
                 return self.async_abort(reason="invalid_backend")
             if mode == BACKEND_OPENHARMONY:
                 return await self.async_step_openharmony()
             return self._backend_result({**self.config_entry.options, CONF_BACKEND: mode})
         selected = configured_backend(self.config_entry)
-        active = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {}).get("backend", "stopped")
-        return self.async_show_form(step_id="backend", data_schema=backend_schema(selected),
-            description_placeholders={"active_backend": active, "selected_backend": selected})
+        current = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        active = current.get("backend", "stopped")
+        policy = "原有设备与映射"
+        if backend_type(self.config_entry) == BACKEND_OPENHARMONY:
+            runtime = current.get("runtime")
+            policy = "未运行；启用时按独立目录的写入策略校验"
+            if runtime:
+                policies = {"fan_only": "风扇及风扇定时可写，灯光只读", "read_only": "全部只读"}
+                policy = policies[runtime.deployment.write_policy]
+        return self.async_show_form(step_id="backend", data_schema=backend_schema(selected, backend_type(self.config_entry)),
+            description_placeholders={"active_backend": active, "selected_backend": selected,
+                                      "write_policy": policy})
 
     async def async_step_openharmony(self, user_input=None):
         errors = {}
@@ -175,7 +194,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     self.config_entry.data.get(CONF_OH_DIRECTORY, ".storage/hwhomebridge/openharmony/lab"))
         if user_input is not None:
             try:
-                await validate_directory(self.hass, user_input[CONF_OH_DIRECTORY])
+                identity = await validate_directory(self.hass, user_input[CONF_OH_DIRECTORY], self.config_entry.entry_id)
+                if self.config_entry.unique_id not in (None, DOMAIN, identity):
+                    raise ValueError("existing gateway identity cannot be changed")
             except (OSError, ValueError, KeyError):
                 errors["base"] = "invalid_openharmony_directory"
             else:
@@ -261,8 +282,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         options_dict = {}
         default_selected = []
         
-        entries = self.hass.config_entries.async_entries(DOMAIN)
-        entry_id = entries[0].entry_id if entries else None
+        entry_id = self.config_entry.entry_id
         
         for vd in all_vds:
             name = vd.product.name or vd.product.pid

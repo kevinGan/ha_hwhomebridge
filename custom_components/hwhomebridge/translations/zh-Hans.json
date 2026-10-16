@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "HuaweiHome Bridge",
-        "description": "选择桥接后端。原有配置默认保留旧 HiLink 后端；OpenHarmony 需单独准备隔离目录。选择停用不会启动网关。",
+        "description": "保留一个原有 HiLink 桥接，并可新增独立 OpenHarmony 网关。新增网关不会切换现有条目。",
         "data": {
           "backend": "桥接后端"
         }
@@ -18,10 +18,11 @@
     },
     "abort": {
       "single_instance_allowed": "此集成仅支持配置一个实例",
-      "invalid_backend": "未知后端，请重新选择。"
+      "invalid_backend": "未知后端，请重新选择。",
+      "already_configured": "该后端网关已配置。"
     },
     "error": {
-      "invalid_openharmony_directory": "独立目录校验失败，请检查路径、权限、程序哈希、profile 和设备身份。"
+      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。"
     }
   },
   "options": {
@@ -44,8 +45,8 @@
         }
       },
       "backend": {
-        "title": "桥接后端 / 启用与回退",
-        "description": "当前运行：{active_backend}；已保存选择：{selected_backend}。\n\nlegacy：原有 HiLink；openharmony：独立 OpenHarmony；disabled：停用。切换会停止当前 OpenHarmony，但保留配对文件。旧 SDK 已在当前进程启动时，切换需重启 HA；失败不会自动启动另一后端。",
+        "title": "当前桥接实例 / 启停",
+        "description": "当前运行：{active_backend}；保存选择：{selected_backend}。\n写入策略：{write_policy}。\n\n停用 OpenHarmony 只停止本实例并保留配对；现有 HiLink 和其他实例继续运行。旧 SDK 常驻时停用旧条目需要重启 HA。更换后端类型请新增独立条目，设置失败不会自动启动另一后端。",
         "data": {
           "backend": "桥接后端"
         }
@@ -69,7 +70,7 @@
       "legacy_only": "此功能仅适用于旧 HiLink 后端。"
     },
     "error": {
-      "invalid_openharmony_directory": "独立目录校验失败，请检查路径、权限、程序哈希、profile 和设备身份。"
+      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。"
     }
   },
   "notify": {

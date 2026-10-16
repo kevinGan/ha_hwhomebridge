@@ -83,7 +83,8 @@ class RESTTransport(ScopedTransport):
 class HomeAssistantTransport(ScopedTransport):
     """供独立后端工作线程调用；不需要 REST token，也不阻塞 HA 事件循环。"""
 
-    def __init__(self, hass):
+    def __init__(self, hass, writable=None):
+        self.writable = None if writable is None else frozenset(writable)
         self.hass = hass
         self.allowed = frozenset()
 
@@ -108,6 +109,8 @@ class HomeAssistantTransport(ScopedTransport):
 
     def call(self, domain, action, entity, **values):
         self.validate_call(domain, action, entity, values)
+        if self.writable is not None and entity not in self.writable:
+            raise ValueError("OpenHarmony transport is read-only for this entity")
         async def invoke():
             await self.hass.services.async_call(domain, action, {"entity_id": entity, **values}, blocking=True)
         return self.run_on_loop(invoke)

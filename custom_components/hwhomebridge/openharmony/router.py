@@ -36,6 +36,7 @@ class OpenHarmonyRouter(ServiceRouter):
         self.devices = {}
         self.roles = {}
         self.forms = {}
+        self.write_entities = None
         self.settle_seconds = .8
         self.fan_settle_seconds = 2
         self.confirm_timeout = 6
@@ -101,6 +102,23 @@ class OpenHarmonyRouter(ServiceRouter):
         allowed = {entity for roles in self.roles.values() for entity in roles.values()}
         self.transport.bind(allowed)
         return self
+
+    def set_write_policy(self, policy):
+        """正式 HA 部署只开放风扇或全部只读；完整映射保留用于查询。"""
+        if policy not in ("fan_only", "read_only"):
+            raise ValueError("unsupported OpenHarmony write policy")
+        self.write_entities = frozenset(
+            roles[role] for roles in self.roles.values()
+            for role in ("fan", "fan_timer_enable", "fan_timer_duration")
+        ) if policy == "fan_only" else frozenset()
+
+    def authorize_entities(self, entities):
+        if self.write_entities is not None and not set(entities).issubset(self.write_entities):
+            raise ValueError("OpenHarmony write policy rejects this entity")
+
+    def authorize_timers(self, sn, timers):
+        self.authorize_entities(self.entity(sn, timer[field])
+                                for timer in timers for field in ("enable", "duration"))
 
     def entity(self, sn, role):
         try:
@@ -219,6 +237,7 @@ class OpenHarmonyRouter(ServiceRouter):
             time.sleep(.25)
 
     def set_timer(self, sn, timer, minutes):
+        self.authorize_timers(sn, [timer])
         minutes = integer(minutes, 0, timer["maximum"])
         if not minutes and not self.active(self.state(self.transport.states(), sn, timer["enable"])):
             return
@@ -233,6 +252,7 @@ class OpenHarmonyRouter(ServiceRouter):
         self.wait(confirmed, self.settle_seconds)
 
     def apply_scalar(self, entity, mapping, payload):
+        self.authorize_entities([entity])
         action, options, domain = mapping.action, mapping.options, mapping.domain
         value = next(iter(payload.values()))
         if action == "turn_on_off":
@@ -297,6 +317,7 @@ class OpenHarmonyRouter(ServiceRouter):
             if not targets:
                 raise ValueError("unsupported timer target")
             timers = [options["timers"][x] for x in targets]
+            self.authorize_timers(sn, timers)
             minutes = integer(data.get(fields["minutes"], current[fields["minutes"]]), 1, min(t["maximum"] for t in timers))
             if fields["enabled"] in data:
                 enabled = integer(data[fields["enabled"]], 0, 1)

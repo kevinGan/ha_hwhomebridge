@@ -217,6 +217,44 @@ class FrameworkTests(unittest.TestCase):
             self.assertFalse(post(b'{"key":"light","key":"aux"}')['ok'])
             self.assertEqual(self.client.calls, [])
         finally:server.shutdown();server.server_close();thread.join()
+    def test_fan_only_policy_rejects_light_and_mixed_timer_before_calls(self):
+        self.router.set_write_policy('fan_only')
+        invalid = [('light', 'switch', {'on': 1}), ('aux', 'switch2', {'on': 1}),
+                   ('light-options', 'switch1', {'on': 1}), ('effects-0', 'switch1', {'on': 1}),
+                   ('light', 'delay', {'action': 2, 'num': 1, 'timer': [{'id': 1}]}),
+                   ('timer-controls', 'countdownht', {'Equipmentname': 0, 'timeing': 2, 'countdownht': 1}),
+                   ('timer-controls', 'countdownht', {'Equipmentname': 1})]
+        for request in invalid:
+            with self.assertRaises(ValueError):
+                self.router.write(*request)
+        self.assertEqual(self.client.calls, [])
+        mapping = self.router.devices['timer-controls'].product.services['countdownht'].ha_mapping
+        mapping.options['targets']['0'].reverse()
+        with self.assertRaises(ValueError):
+            self.router.write('timer-controls', 'countdownht', {'Equipmentname': 0, 'timeing': 2, 'countdownht': 1})
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(self.router.forms, {})
+
+    def test_fan_only_policy_keeps_fan_timer_and_direction_writable(self):
+        self.router.set_write_policy('fan_only')
+        self.router.write('timer-controls', 'verticalswing', {'verticalswing': 0})
+        self.router.write('timer-controls', 'countdownht', {'Equipmentname': 2, 'timeing': 2, 'countdownht': 1})
+        self.assertEqual(self.router.snapshot('fan-wifi')['endTime']['time'], 2)
+        self.assertEqual(self.router.snapshot('light')['delay']['num'], 0)
+        self.assertEqual({call['entity'] for call in self.client.calls},
+                         {self.client.roles[k] for k in ('fan', 'fan_timer_enable', 'fan_timer_duration')})
+
+    def test_read_only_and_unknown_policy_fail_closed(self):
+        self.router.set_write_policy('read_only')
+        for request in [('timer-controls', 'switchFan', {'on': 1}), ('fan-wifi', 'endTime', {'time': 2})]:
+            with self.assertRaises(ValueError):
+                self.router.write(*request)
+        self.assertEqual(self.client.calls, [])
+        self.assertEqual(len(self.router.devices), 8)
+        self.assertEqual(self.router.snapshot('fan-wifi')['switch'], {'on': 0})
+        with self.assertRaises(ValueError):
+            self.router.set_write_policy('all')
+
     def test_ha_transport_requires_worker_and_dispatches_on_ha_loop(self):
         roles = self.client.roles
         class State:

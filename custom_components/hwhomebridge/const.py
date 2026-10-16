@@ -4,6 +4,7 @@ DOMAIN = "hwhomebridge"
 
 CONF_BACKEND = "backend"
 CONF_OH_DIRECTORY = "openharmony_directory"
+CONF_BACKEND_TYPE = "backend_type"
 BACKEND_LEGACY = "legacy"
 BACKEND_OPENHARMONY = "openharmony"
 BACKEND_DISABLED = "disabled"
@@ -16,6 +17,35 @@ def configured_backend(entry):
     if backend not in BACKENDS:
         raise ValueError("unknown bridge backend")
     return backend
+
+
+def backend_type(entry):
+    """条目类型固定；兼容尚未写入类型的旧配置和单后端原型。"""
+    kind = entry.data.get(CONF_BACKEND_TYPE)
+    if kind is None:
+        selected = configured_backend(entry)
+        has_openharmony_config = (
+            selected == BACKEND_OPENHARMONY
+            or entry.data.get(CONF_BACKEND) == BACKEND_OPENHARMONY
+            or CONF_OH_DIRECTORY in entry.options
+            or CONF_OH_DIRECTORY in entry.data
+        )
+        kind = BACKEND_OPENHARMONY if has_openharmony_config else BACKEND_LEGACY
+    if kind not in (BACKEND_LEGACY, BACKEND_OPENHARMONY):
+        raise ValueError("unknown bridge entry type")
+    return kind
+
+
+def legacy_entry_id(hass):
+    """旧 SDK 的设备注册始终归旧条目，不依赖多条目的加载顺序。"""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        try:
+            if backend_type(entry) == BACKEND_LEGACY:
+                return entry.entry_id
+        except ValueError:
+            continue
+    return None
+
 
 # 来自这些集成（platform）的实体不做映射，避免循环接入。
 # 例如社区插件 ha-huawei-smarthome（domain: huawei_smarthome）将华为设备接入 HA，

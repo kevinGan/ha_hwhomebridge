@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "HuaweiHome Bridge",
-        "description": "Choose a bridge backend. Existing entries retain legacy HiLink. OpenHarmony requires a prepared isolated directory. Disabled starts no gateway.",
+        "description": "Keep one legacy HiLink entry and add independent OpenHarmony gateways without switching existing entries.",
         "data": {
           "backend": "Bridge backend"
         }
@@ -18,10 +18,11 @@
     },
     "abort": {
       "single_instance_allowed": "Only a single instance of this integration is allowed",
-      "invalid_backend": "Unknown backend. Choose again."
+      "invalid_backend": "Unknown backend. Choose again.",
+      "already_configured": "This backend gateway is already configured."
     },
     "error": {
-      "invalid_openharmony_directory": "Invalid isolated directory. Check paths, permissions, binary hash, profiles and device identities."
+      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports."
     }
   },
   "options": {
@@ -44,8 +45,8 @@
         }
       },
       "backend": {
-        "title": "Bridge backend / enable and rollback",
-        "description": "Active: {active_backend}; saved selection: {selected_backend}.\n\nlegacy: original HiLink; openharmony: isolated backend; disabled: stopped. OpenHarmony stops without deleting pairing. Switching away from a resident legacy SDK requires an HA restart. Failures never start another backend automatically.",
+        "title": "Current bridge instance / enable and disable",
+        "description": "Active: {active_backend}; saved: {selected_backend}.\nWrite policy: {write_policy}.\n\nDisabling OpenHarmony stops only this instance and keeps pairing. Legacy HiLink and other instances keep running. Disabling a resident legacy SDK requires an HA restart. Add a separate entry for another backend type; setup failure never starts another backend.",
         "data": {
           "backend": "Bridge backend"
         }
@@ -69,7 +70,7 @@
       "legacy_only": "This action is available only for the legacy HiLink backend."
     },
     "error": {
-      "invalid_openharmony_directory": "Invalid isolated directory. Check paths, permissions, binary hash, profiles and device identities."
+      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports."
     }
   },
   "notify": {
