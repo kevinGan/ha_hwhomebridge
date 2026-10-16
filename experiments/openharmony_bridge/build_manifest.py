@@ -12,9 +12,9 @@ SOURCES = (
     "zig-cc.sh", "build_manifest.py", "main.c", "linux_network.c", "poc_network.h",
     "ha_children.c", "ha_children.h", "virtual_child.c", "virtual_child.h",
     "coap_alignment_test.c", "ha_child_state_test.c", "virtual_child_state_test.c",
-    "speke_vectors.c",
+    "speke_vectors.c", "identity_state_probe.c",
 )
-OUTPUTS = ("bridge_poc", "coap_alignment_test", "ha_child_state_test", "virtual_child_state_test", "speke_vectors")
+OUTPUTS = ("bridge_poc", "coap_alignment_test", "ha_child_state_test", "virtual_child_state_test", "speke_vectors", "identity_state_probe")
 
 
 def digest(path):

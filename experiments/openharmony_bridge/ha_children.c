@@ -147,6 +147,16 @@ int PocHaInit(const char *parent_sn, bool enabled) {
         char input[128], hash[65]; snprintf(input, sizeof(input), "%s#ha-%s-v1", parent_sn, key);
         if (hash_hex(input, hash)) return -1;
         snprintf(ha_child.sn, sizeof(ha_child.sn), "OHPOC-HA-%.24s", hash);
+        /* 单引擎实验可保留公共 VirtualDevice 已有 SN；默认实验身份算法不变。 */
+        const cJSON *sn_item = cJSON_GetObjectItemCaseSensitive(ha_child.definition, "sn");
+        if (sn_item && !cJSON_IsString(sn_item)) return -1;
+        const char *saved_sn = string_field(ha_child.definition, "sn");
+        if (saved_sn) {
+            if (!valid_id(saved_sn, false) || strlen(saved_sn) >= sizeof(ha_child.sn)) return -1;
+            strcpy(ha_child.sn, saved_sn);
+        }
+        for (size_t j = 0; j < i; ++j)
+            if (!strcmp(children[j].sn, ha_child.sn)) return -1;
         snprintf(ha_child.mac, sizeof(ha_child.mac), "02:%.2s:%.2s:%.2s:%.2s:%.2s", hash, hash+2, hash+4, hash+6, hash+8);
         snprintf(input, sizeof(input), "OpenHarmonyHA%s%s", key, ha_child.sn);
         if (hash_hex(input, ha_child.udid) || restore()) return -1;
