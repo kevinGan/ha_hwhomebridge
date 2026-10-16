@@ -185,6 +185,7 @@ async def run(origin, token_file, output, create):
             raise ValueError('private regular output files required')
     token = token_file.read_text().strip()
     journal_path = output / 'journal.private.json'
+    created_on_this_connection = False
     async with BackupClient(origin, token) as client:
         supervisor = await client.call('/supervisor/info')
         core = await client.call('/core/info')
@@ -204,6 +205,7 @@ async def run(origin, token_file, output, create):
             journal['request_sent'] = True
             private_json(journal_path, journal)
             response = await client.call('/backups/new/partial', 'post', body(journal['name']), journal['name'])
+            created_on_this_connection = True
             journal.update({k: response[k] for k in ('slug', 'job_id') if k in response})
             private_json(journal_path, journal)
         deadline = monotonic() + 600
@@ -236,7 +238,7 @@ async def run(origin, token_file, output, create):
                   'legacy_runtime_included_online': True, 'runtime_KV_consistency_verified': False,
                   'component_files': len(inventory['component_files']), 'database_excluded': True,
                   'addons_included': False, 'Core_stop_or_restart_requested': False,
-                  'HA_websocket_survived_backup_job': True,
+                  'HA_websocket_survived_backup_job': created_on_this_connection,
                   'cold_backup': False, 'pairing_handover_snapshot': False,
                   'supervisor_version': SUPERVISOR, 'core_version': CORE}
         private_json(output / 'report.json', result)
