@@ -18,12 +18,13 @@
 
 ## 从源码重建
 
-在仓库根目录执行，使用 Python 3.12+、CMake、Zig 和 curl。静态构建入口当前生成 Linux ARM64；目标生产 x86_64 的构建与实际运行属于计划 M2，不能用此结果代替。
+在仓库根目录执行，使用 Python 3.12+、CMake、Zig 和 curl。静态构建入口分别支持 Linux ARM64 与 x86_64，缺省仍为 ARM64；目标平台的真实运行证据须单独检查，不能用交叉编译结果代替。
 
 ```sh
 python3 experiments/openharmony_bridge/bootstrap.py
 python3 experiments/openharmony_bridge/prepare_test_assets.py experiments/openharmony_bridge/assets
-sh experiments/openharmony_bridge/build-ha-static.sh
+sh experiments/openharmony_bridge/build-ha-static.sh aarch64
+sh experiments/openharmony_bridge/build-ha-static.sh x86_64
 python3 experiments/openharmony_bridge/framework_test.py
 ```
 
@@ -56,6 +57,6 @@ HA 配置目录中的实例不含 REST 连接或 token。配对文件仍为敏�
 
 ## 验收边界
 
-此前配对 App 验收在 ARM64 独立环境完成；M0 归档不重新操作真实风扇或灯光。同一 HA 新旧后端共存、旧条目兼容和故障隔离已在 M1 独立验证，复现步骤见[共存说明](openharmony-coexistence.md)；真实旧 SDK 和 x86_64 平台验收仍属于 M2。部署通道、生产安装、配对跨主机交接及上线验收分别属于 M3–M5。
+此前配对 App 验收在 ARM64 独立环境完成；M0 归档不重新操作真实风扇或灯光。同一 HA 新旧后端共存、旧条目兼容和故障隔离已在 M1 独立验证，复现步骤见[共存说明](openharmony-coexistence.md)；M2 的 x86_64 Linux 虚拟机及未配对真实旧 SDK 共存验证见 [M2 说明](openharmony-x86-sdk-validation.md)。部署通道、生产安装、配对跨主机交接及上线验收分别属于 M3–M5。
 
 Jev 辅助文件用途分类，最终提交清单和私密资料排除由 Codex 复核。

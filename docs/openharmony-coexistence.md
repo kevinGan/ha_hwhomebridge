@@ -2,7 +2,7 @@
 
 M0/M1 在独立 Linux ARM64、HA Core 2026.10.1 / Python 3.14.6 中完成。旧闭源 SDK 用调用替身；旧 Python 路由、ctypes 回调、设备注册和状态监听使用项目实现。OpenHarmony 使用从干净源码归档重建的真实静态 C 程序。测试只注册 `oh_flow_*` 虚拟实体，容器位于 Podman 内部网络，不携带生产 token、配对身份或旧 SDK 库。
 
-脱敏结果见 [coexistence-verification.json](../experiments/openharmony_bridge/coexistence-verification.json)。这不是新一轮智慧生活 App 验收，也不是 x86_64 或真实闭源 SDK 共存验收。生产安装和身份交接仍需完成融合计划 M2–M5。
+脱敏结果见 [coexistence-verification.json](../experiments/openharmony_bridge/coexistence-verification.json)。本页 M1 结果不含新一轮智慧生活 App 验收、x86_64 或真实闭源 SDK 共存验收。后续完成的 M2 结果单列在 [x86_64 与真实 SDK 验证](openharmony-x86-sdk-validation.md)，生产安装和身份交接仍需完成 M3–M5。
 
 ## 条目与运行资源
 
@@ -73,6 +73,6 @@ podman run --rm --network hwhomebridge-coexistence-test \
 
 每个完整场景中旧 SDK 启动记录为一次，解绑记录为零；旧 ctypes 控制和状态监听经过虚拟灯开关验证。框架 22 项回归还保留完整灯光行为验证，并覆盖风扇白名单。干净归档构建的 C 字节对齐、多子设备路由及虚拟开关持久化回归均在真实 ARM64 Linux 通过。原产品配置验证通过；只读核对的 13 个源 HA 实体前后完全一致。
 
-后续先完成 M2 的 x86_64 静态构建、真实 Linux 运行，以及使用独立身份的真实旧 SDK 共存。不能把调用替身结果升级为真实 SDK 结论，也不能把本阶段的虚拟实体测试当作生产控制验收。
+M2 已另行完成 x86_64 Linux 虚拟机运行和使用独立未配对身份的真实旧 SDK 共存，详见 [M2 说明](openharmony-x86-sdk-validation.md)。M1 调用替身结果与 M2 原生库结果分别保存；两者均不代替后续生产控制验收。下一步为 M3 的安装、备份和部署预检。
 
 Jev 用于 M0 文件用途分类，Codex 复核提交边界和生命周期逻辑；组件没有新增 Jev 运行时依赖。

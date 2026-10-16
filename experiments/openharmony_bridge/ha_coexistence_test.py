@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import platform
 from pathlib import Path
 import shutil
 import socket
@@ -29,6 +30,7 @@ RESULT = CONFIG / 'coexistence-results.json'
 
 
 class SDKRecorder:
+    evidence = 'call recorder; actual legacy Python/ctypes routing'
     def __init__(self):
         self.starts = 0
         self.registrations = 0
@@ -134,13 +136,13 @@ def install_legacy_recorder(hass):
     return legacy, sdk, vd
 
 
-async def make_hass():
+async def make_hass(install_legacy=install_legacy_recorder):
     hass = HomeAssistant(str(CONFIG))
     loader.async_setup(hass)
     hass.config.skip_pip = True
     calls = []
     roles = fixture(hass, calls)
-    legacy, sdk, vd = install_legacy_recorder(hass)
+    legacy, sdk, vd = install_legacy(hass)
     result = await bootstrap.async_from_config_dict({'homeassistant': {
         'name': 'Isolated coexistence test', 'latitude': 0, 'longitude': 0,
         'elevation': 0, 'unit_system': 'metric', 'time_zone': 'Asia/Shanghai'}}, hass)
@@ -232,10 +234,11 @@ async def check_legacy(hass, sdk, vd, entry):
     assert len(sdk.reports) >= before + 2 and sdk.reports[-1] == {'on': 0}, sdk.reports
 
 
-async def exercise(oh_first=False, restore=False):
-    results = {'legacy_SDK': 'call recorder; actual legacy Python/ctypes routing',
-               'OpenHarmony_C': 'real Linux ARM64 process', 'real_devices_accessed': False}
-    hass, calls, roles, legacy, sdk, vd = await make_hass()
+async def exercise(oh_first=False, restore=False, *, install_legacy=install_legacy_recorder,
+                   check_legacy=check_legacy):
+    results = {'OpenHarmony_C': f'real Linux {platform.machine()} process', 'real_devices_accessed': False}
+    hass, calls, roles, legacy, sdk, vd = await make_hass(install_legacy)
+    results['legacy_SDK'] = sdk.evidence
     try:
         if restore:
             entries = hass.config_entries.async_entries('hwhomebridge')
