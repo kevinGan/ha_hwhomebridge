@@ -70,7 +70,7 @@
   "verified_at": "2026-10-16T20:49:20.125409+08:00",
   "fix_commit": "41d472a",
   "environment": "hwhomebridge-poc / hwhomebridge-paired-ha-test",
-  "acceptance_scope": "Linux direct HA service writes and readback via independent native backend; App UI pending",
+  "acceptance_scope": "Independent backend API writes/readback on both cards, followed by real Smart Life App on/off on timer-controls after backend reload",
   "network": {
     "before": "LAN TCP immediately refused, public TCP worked, no Linux filter reject rules",
     "recovery": "Gracefully stopped and restarted this Lima VZ instance; no proxy or OS permission changes",
@@ -90,13 +90,66 @@
     "configuration_validation_passed": true
   },
   "smart_life_app": {
-    "verified_this_run": false,
-    "blocker": "MatePad was locked, then HDC disconnected; awaiting unlock and restored debugging",
-    "reconnect_to_previous_debug_endpoint": "failed"
+    "card": "timer-controls",
+    "sid": "verticalswing",
+    "actual_App_clicks": 2,
+    "C_writes_confirmed": 2,
+    "C_read_callbacks": 2,
+    "source_calls": 2,
+    "directions": [
+      "forward",
+      "reverse"
+    ],
+    "writes_fan_direction_only": true,
+    "light_related_entities": 9,
+    "light_full_records_unchanged": true,
+    "fan_power_preserved": true,
+    "fan_percentage_preserved": true,
+    "fan_direction_restored": true,
+    "fan_timers_unchanged": true,
+    "cloud_online": true,
+    "children_online": 8,
+    "identity_unchanged": true,
+    "rebind": 0,
+    "pin_callbacks": 0,
+    "no_C_panic_during_App_test": true,
+    "verified_this_run": true,
+    "verified_at": "2026-10-16T21:13:34.344141+08:00",
+    "paired_card_SN_verified": true,
+    "App_toggle_on_and_off_visually_verified": true,
+    "reconnected_after_unlock": true,
+    "screen_timeout_override_restored": true,
+    "physical_blade_rotation_directly_observed": false,
+    "initial_blocker_history": "Previous run had a locked MatePad and failed reconnect; resumed after user unlocked it."
   },
   "jev": {
     "model": "jev-1.13.0",
-    "use": "Classified diagnostic priority as virtual network layer; diagnosis and recovery verified by Codex"
+    "use": "Classified diagnostic priority as virtual network layer; diagnosis and recovery verified by Codex",
+    "App_acceptance_classification": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "path": {
+          "type": "choice",
+          "choice": "app_path",
+          "confidence": 0.98,
+          "probabilities": {
+            "app_path": 0.99,
+            "api_only": 0.0,
+            "insufficient": 0.01
+          }
+        },
+        "physical_observation": {
+          "type": "choice",
+          "choice": "not_observed",
+          "confidence": 1.0,
+          "probabilities": {
+            "observed": 0.0,
+            "not_observed": 1.0,
+            "unclear": 0.0
+          }
+        }
+      }
+    }
   },
   "network_stability": {
     "direct_authenticated_probes": 6,
