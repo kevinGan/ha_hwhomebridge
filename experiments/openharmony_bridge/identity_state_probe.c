@@ -78,8 +78,23 @@ int main(int argc, char **argv) {
         if (mbedtls_sha256_ret(device_id, strnlen((char *)device_id, length), digest, 0)) return 2;
         for (size_t i = 0; i < sizeof(digest); ++i) snprintf(hex_digest + i * 2, 3, "%02x", digest[i]);
     }
-    printf("IDENTITY_PROBE {\"config_init\":%d,\"storage_read\":%d,\"bound_identity_loaded\":%s,\"dev_id_sha256\":\"%s\",\"network_started\":false}\n",
+    printf("IDENTITY_PROBE {\"config_init\":%d,\"storage_read\":%d,\"bound_identity_loaded\":%s,\"dev_id_sha256\":\"%s\",\"network_started\":false,\"fields\":{",
         result, pulled, bound ? "true" : "false", hex_digest);
+    const ConfigInfoKey keys[] = {CONFIG_INFO_KEY_LOGIN_SECRET, CONFIG_INFO_KEY_LOGIN_PSK,
+        CONFIG_INFO_KEY_UID_HASH, CONFIG_INFO_KEY_AUTHCODE_ID, CONFIG_INFO_KEY_AUTHCODE};
+    const char *names[] = {"secret", "psk", "uid_hash", "auth_id", "auth_code"};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+        uint8_t value[256] = {0}; uint32_t size = sizeof(value);
+        bool ok = bound && ConfigInfoGet(keys[i], value, &size) == 0;
+        if (ok) {
+            size_t used = (i == 1 || i == 4) ? 16 : strnlen((char *)value, size);
+            if (mbedtls_sha256_ret(value, used, digest, 0)) return 2;
+            for (size_t j = 0; j < sizeof(digest); ++j) snprintf(hex_digest + j * 2, 3, "%02x", digest[j]);
+        }
+        printf("%s\"%s\":\"%s\"", i ? "," : "", names[i], ok ? hex_digest : "");
+        memset(value, 0, sizeof(value));
+    }
+    printf("}}\n");
     ConfigInfoDeinit();
     SecurityStoreDeinit();
     ModelDevInfoDeinit();

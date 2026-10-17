@@ -28,6 +28,13 @@ def check(binary):
         assert json.loads((root / 'ha-child-fan.json').read_text())['sn'] == expected
         run(True)
         assert hashlib.sha256(old_path.read_bytes()).hexdigest() == before
+        rows[0]['existing_cloud_only'] = True
+        run(False)  # 接管声明缺少原云端ID时，不允许退化成新绑定。
+        saved = json.loads(old_path.read_text())
+        saved['devId'] = 'old-cloud-child-id'
+        old_path.write_text(json.dumps(saved))
+        run(True)
+        before = hashlib.sha256(old_path.read_bytes()).hexdigest()
         for bad in ('', 'has/slash', 'x' * 40, 123):
             rows[1]['sn'] = bad
             run(False)
@@ -39,6 +46,7 @@ def check(binary):
         assert hashlib.sha256(old_path.read_bytes()).hexdigest() == before
     return {'passed': True, 'explicit_legacy_SN_preserved': True, 'default_SN_unchanged': True,
             'restart_preserves_identity': True, 'invalid_duplicate_or_replaced_SN_rejected': True,
+            'imported_child_without_cloud_ID_rejected': True,
             'SDK_started_or_cloud_registration': False}
 
 

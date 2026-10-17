@@ -1,8 +1,8 @@
 # OpenHarmony 唯一引擎隔离评估
 
-核查日期：2026-10-17。**一个 OpenHarmony 父网关同时承载旧灯模板和新风扇的最小实验已经通过；保留旧 SDK 已配对身份的接管和完整回退尚未通过。** 因此还不能替换原 HA 的网关，也没有生成可以承诺无损迁移的正式安装包。
+核查日期：2026-10-17。**单引擎共用网关，以及旧 SDK 独立测试身份的接管、冷重启和回退闭环均已通过。** 本轮新增结果见[旧身份导入记录](legacy-identity-offline-import.md)，仅覆盖一盏虚拟旧灯；全旧品类、ARM 实际运行和正式 HA 配置流迁移仍未验收。 因此还不能替换原 HA 的网关，也没有生成可以承诺无损迁移的正式安装包。
 
-机器记录：[隔离评估](../../experiments/openharmony_bridge/evidence/single-engine-evaluation.json)。原 SDK 的[源码/扩展调查](legacy-native-public-source-research.md)仍有效；旧库扩展门槛没有因为另一引擎的新身份实验通过而变成通过。
+机器记录：[上轮单引擎评估](../../experiments/openharmony_bridge/evidence/single-engine-evaluation.json)、[本轮身份接管与回退](../../experiments/openharmony_bridge/evidence/legacy-identity-handover-evaluation.json)。原 SDK 的[源码/扩展调查](legacy-native-public-source-research.md)仍有效；旧库扩展门槛没有因为另一引擎的新身份实验通过而变成通过。
 
 ## 已验证的单引擎范围
 
@@ -29,7 +29,9 @@
 
 没有推断 15013 的官方含义。这个对照说明：不能只因 profile 标记 WiFi 就把桥接子设备的 transport type 机械设为 1。正式产品目录需要明确记录桥接类型，并逐类验收。
 
-## 旧 SDK 身份 B：接管仍受阻
+## 旧 SDK 身份 B：上轮阻断记录
+
+以下记录保留上轮失败现场；后续的崩溃修复、离线转换和在线接管见[旧身份导入记录](legacy-identity-offline-import.md)。
 
 另建全新 B 根 SN、48 字节 AC、临时 PIN 和运行目录。旧 SDK 保留了预置测试 SN，智慧生活完成发现、PIN 配对，SDK 状态到 1；测试灯卡也出现在 App。没有使用生产配对资料，也没有解绑任何现有设备。
 
@@ -49,9 +51,9 @@
 | B 旧 SDK 原文件名 | 没有加载已绑定身份；读取返回 0 也不能当成功，缺少文件会走默认状态 |
 | B 的 `config.cfg` 复制为 `dev_data` | 格式校验失败，没有加载身份 |
 
-旧 SDK 的二进制 `config.cfg` 为 1588 字节，`bridge.cfg` 为 5192 字节；A 的 OpenHarmony 配对存储为 `dev_data` 568 字节、`conn_data` 184 字节。文件长度和命名差异只能证明不能直接复制，不能证明不存在转换方法。当前没有经过验证的旧格式解码器，未按猜测的字段偏移转换，也没有启动 OpenHarmony 以旧 SN 重新配对。
+旧 SDK 的二进制 `config.cfg` 为 1588 字节，`bridge.cfg` 为 5192 字节；A 的 OpenHarmony 配对存储为 `dev_data` 568 字节、`conn_data` 184 字节。文件长度和命名差异只能证明不能直接复制，不能证明不存在转换方法。上轮没有经过验证的旧格式解码器，未按猜测的字段偏移转换，也没有启动 OpenHarmony 以旧 SN 重新配对。
 
-`single_engine_owner.py` 现在明确拒绝从含非空旧 `config.cfg`/备份的目录启动 OpenHarmony。已在 B 上验证拒绝发生在 C 程序启动前，测试容器无网络，旧配对文件不变。之后重新启动原来的 B 旧 SDK，恢复在线；完整子控制回退仍失败，不能标记接管、回退完成。
+上轮的 `single_engine_owner.py` 明确拒绝从含非空旧 `config.cfg`/备份的目录启动 OpenHarmony。已在 B 上验证拒绝发生在 C 程序启动前，测试容器无网络，旧配对文件不变。之后重新启动原来的 B 旧 SDK，恢复在线；完整子控制回退仍失败，不能标记接管、回退完成。
 
 ## 可复用实验入口
 
@@ -84,9 +86,11 @@ python3 -B experiments/openharmony_bridge/single_engine_identity_check.py \
 
 本轮容器采用只读根文件系统、源代码白名单只读挂载和单独 `/lab`；SDK 需要云端网络，业务 HTTP 只绑定 Linux 回环地址。宿主使用 HA Core `2026.10.1` / Python `3.14.6`。不是独立 HA 的配置流安装验收。启动程序通过文件锁拒绝同一根目录的第二个所有者，C 层仍要求测试根 `OHPOC-` 前缀。
 
-新增 C 目录允许显式子 SN，校验类型、字符、长度、重复和已保存身份的一致性；没有显式 SN 时仍用原实验算法。这个能力使旧 VirtualDevice 的 SN 可以进入新引擎，但不导入旧云端 child ID、UDID 或鉴权资料。把它当作旧绑定迁移工具是不正确的。
+上轮新增的 C 目录允许显式子 SN，校验类型、字符、长度、重复和已保存身份的一致性；没有显式 SN 时仍用原实验算法。这个能力使旧 VirtualDevice 的 SN 可以进入新引擎，但不导入旧云端 child ID、UDID 或鉴权资料。把它当作旧绑定迁移工具是不正确的。
 
-## 下一步及交付门槛
+## 上轮列出的交付门槛
+
+本节保留当时的门槛顺序，完成状态以[后续导入记录](legacy-identity-offline-import.md)为准。
 
 1. **先解决旧测试身份资料的读取合同。** 明确旧 SDK 文件版本、结构、完整性/加密方式及凭据语义；可以继续查 SDK 同版本公开资料或向维护者取得持久化合同。用 B 冷副本建立经过正反例校验的离线解码/导入器，同时核对旧根与子设备的云端 ID、SN、UDID、型号、MAC、父关系。没有身份对照就继续禁止在线接管。
 2. **先补齐旧 SDK 实验基线。** 定位 B 的服务表/空 SID/退出 139，确认实验回调合同并取得 App 控制、读回、冷重启成功证据。这个基线不可靠时，不能承诺回退可用。

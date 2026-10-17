@@ -160,6 +160,8 @@ int PocHaInit(const char *parent_sn, bool enabled) {
         snprintf(ha_child.mac, sizeof(ha_child.mac), "02:%.2s:%.2s:%.2s:%.2s:%.2s", hash, hash+2, hash+4, hash+6, hash+8);
         snprintf(input, sizeof(input), "OpenHarmonyHA%s%s", key, ha_child.sn);
         if (hash_hex(input, ha_child.udid) || restore()) return -1;
+        if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "existing_cloud_only")) &&
+            !ha_child.dev_id[0]) return -1;
     }
     return 0;
 }
@@ -396,7 +398,10 @@ static void tick(int32_t id, void *data) {
 void PocHaCloudOnline(void) {
     for (size_t i=0; i<child_count; ++i) {
         current=&children[i]; ha_child.connected=true; ha_child.pending=false; ha_child.attempts=0;
-        ha_child.phase=ha_child.dev_id[0] ? CHILD_SYNC : CHILD_BIND;
+        /* 旧SDK离线接管保留云端已有元数据，只上线，不覆盖其UDID或重新绑定。 */
+        bool imported = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "existing_cloud_only"));
+        if (!ha_child.dev_id[0]) ha_child.phase = CHILD_BIND;
+        else ha_child.phase = imported ? CHILD_ONLINE : CHILD_SYNC;
     }
     if (child_count && ha_timer < 0) ha_timer=SchedTimerAdd(EVENT_SOURCE_TIMER_TYPE_REPEAT, tick, 2000, NULL);
 }

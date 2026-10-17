@@ -298,7 +298,7 @@ int main(int argc, char **argv) {
     if (enable_child && (!cJSON_IsBool(enable_child) || !live || strcmp(field("prodId"), "ZG37"))) return 2;
     if (PocChildInit(live ? field("sn") : NULL, cJSON_IsTrue(enable_child))) return 2;
     const cJSON *enable_ha = cJSON_GetObjectItemCaseSensitive(config, "enable_ha_children");
-    if (enable_ha && (!cJSON_IsBool(enable_ha) || !live || !cJSON_IsTrue(enable_child))) return 2;
+    if (enable_ha && (!cJSON_IsBool(enable_ha) || !live || strcmp(field("prodId"), "ZG37"))) return 2;
     if (PocHaInit(live ? field("sn") : NULL, cJSON_IsTrue(enable_ha))) return 2;
     char *saved = read_file("switch.json", 128);
     if (saved) {

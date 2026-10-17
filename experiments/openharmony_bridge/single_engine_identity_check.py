@@ -51,6 +51,7 @@ def probe_copy(binary, state, gateway, variant='original'):
         result = json.loads(rows[0])
         # 身份摘要只用于本进程比较；公开结果不携带原始身份或凭据。
         result.pop('dev_id_sha256')
+        result.pop('fields', None)
         return result
 
 
