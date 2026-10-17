@@ -10,6 +10,8 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <limits.h>
 #include <time.h>
 #include <unistd.h>
 #include "cJSON.h"
@@ -208,8 +210,13 @@ static int load_config(const char *path, bool live) {
         const char *s = field(required[i]);
         if (!s || !s[0]) { fprintf(stderr, "缺少产品字段: %s\n", required[i]); return -1; }
     }
-    /* 独立身份，拒绝使用生产桥接的 HB/网关 SN。 */
-    if (strncmp(field("sn"), "OHPOC-", 6) || strlen(field("sn")) > 39) return -1;
+    /* 普通实验只用OHPOC；显式接管还必须由离线读取器确认原绑定。 */
+    bool bound_mode = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(config, "preserve_bound_identity"));
+    if ((!bound_mode && strncmp(field("sn"), "OHPOC-", 6)) || strlen(field("sn")) > 39 ||
+        strspn(field("sn"), "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != strlen(field("sn"))) return -1;
+    if (bound_mode && (!cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(config, "enable_virtual_child")) ||
+        !field("expected_cloud_id_sha256") || strlen(field("expected_cloud_id_sha256")) != 64)) return -1;
+    if (bound_mode && !live) return -1;
     if (!live) return 0;
     struct stat st;
     if (stat(path, &st) || (st.st_mode & 077) || st.st_uid != getuid()) {
@@ -242,6 +249,45 @@ static int load_config(const char *path, bool live) {
     if (!ca_pem || !strstr(ca_pem, "-----BEGIN CERTIFICATE-----")) return -1;
     ca_list[0] = ca_pem;
     return 0;
+}
+/* 启动任何SDK任务前，用同目录的原生离线探针确认已有根身份。 */
+static int verify_bound(const char *executable, const char *gateway) {
+    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(config, "preserve_bound_identity"))) return 0;
+    char probe[PATH_MAX];
+    if (strlen(executable) + 32 >= sizeof(probe)) return -1;
+    strcpy(probe, executable);
+    char *slash = strrchr(probe, '/');
+    if (!slash) return -1;
+    strcpy(slash + 1, "identity_state_probe");
+    struct stat info;
+    if (lstat(probe, &info) || !S_ISREG(info.st_mode) || info.st_uid != getuid() || (info.st_mode & 077)) return -1;
+    int descriptors[2];
+    if (pipe(descriptors)) return -1;
+    pid_t pid = fork();
+    if (!pid) {
+        close(descriptors[0]);
+        if (dup2(descriptors[1], STDOUT_FILENO) < 0) _exit(127);
+        close(descriptors[1]);
+        execl(probe, probe, "sdk-state", gateway, (char *)NULL);
+        _exit(127);
+    }
+    close(descriptors[1]);
+    if (pid < 0) { close(descriptors[0]); return -1; }
+    char output[8193]; size_t used = 0; ssize_t count;
+    while (used < sizeof(output) - 1 && (count = read(descriptors[0], output + used, sizeof(output) - 1 - used)) > 0)
+        used += (size_t)count;
+    close(descriptors[0]); output[used] = 0;
+    int status;
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) || WEXITSTATUS(status)) return -1;
+    char *line = strstr(output, "IDENTITY_PROBE ");
+    if (!line) return -1;
+    cJSON *proof = cJSON_Parse(line + 15);
+    const char *hash = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(proof, "dev_id_sha256"));
+    bool valid = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(proof, "bound_identity_loaded")) &&
+        hash && !strcmp(hash, field("expected_cloud_id_sha256"));
+    cJSON_Delete(proof);
+    event("bound_identity_verified", valid ? 0 : -1);
+    return valid ? 0 : -1;
 }
 #define SET_OPTION(option, ...) do { int32_t r = IotcOhSetOption(option, __VA_ARGS__); \
     if (r) { event("set_option_failed", r); return r; } } while (0)
@@ -294,6 +340,7 @@ int main(int argc, char **argv) {
     }
     int lock = open("process.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
     if (lock < 0 || flock(lock, LOCK_EX | LOCK_NB)) { fprintf(stderr, "实验目录被占用\n"); return 2; }
+    if (live && verify_bound(argv[0], argv[3])) return 2;
     const cJSON *enable_child = cJSON_GetObjectItemCaseSensitive(config, "enable_virtual_child");
     if (enable_child && (!cJSON_IsBool(enable_child) || !live || strcmp(field("prodId"), "ZG37"))) return 2;
     if (PocChildInit(live ? field("sn") : NULL, cJSON_IsTrue(enable_child))) return 2;

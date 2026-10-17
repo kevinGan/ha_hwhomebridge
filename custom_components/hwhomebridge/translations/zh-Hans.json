@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "HuaweiHome Bridge",
-        "description": "保留一个原有 HiLink 桥接，并可新增独立 OpenHarmony 网关。新增网关不会切换现有条目。",
+        "description": "已有集成请点原条目的“配置 → 接管当前网关”，不会新建网关。此处用于首次创建 HiLink 网关，或从已校验资料恢复已有配对网关。",
         "data": {
           "backend": "桥接后端"
         }
@@ -14,6 +14,14 @@
         "data": {
           "openharmony_directory": "独立目录"
         }
+      },
+      "existing_gateway": {
+        "title": "沿用当前网关：启停与后端切换",
+        "description": "从已校验的私有资料恢复一个已有配对网关。已有配置条目时请使用原条目的配置页；恢复资料不会新建云端父身份。",
+        "data": {
+          "gateway_directory": "现有网关资料目录",
+          "backend": "桥接引擎"
+        }
       }
     },
     "abort": {
@@ -22,7 +30,8 @@
       "already_configured": "该后端网关已配置。"
     },
     "error": {
-      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。"
+      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。",
+      "invalid_gateway_directory": "检查原条目、网关身份、子设备目录、权限及原生程序；不会创建新身份。"
     }
   },
   "options": {
@@ -57,6 +66,14 @@
         "data": {
           "openharmony_directory": "独立目录"
         }
+      },
+      "gateway_lifecycle": {
+        "title": "沿用当前网关：启停与后端切换",
+        "description": "当前运行：{active_backend}；保存选择：{selected_backend}；失败引擎：{failed_backend}。\n\n沿用当前配置条目和已配对身份。目录需先离线准备并通过身份校验。切换失败会退回同一身份的已验证引擎；旧库已驻留时需重启 HA。删除或停用此配置不会解绑。",
+        "data": {
+          "gateway_directory": "现有网关资料目录",
+          "backend": "桥接引擎"
+        }
       }
     },
     "progress": {
@@ -70,7 +87,8 @@
       "legacy_only": "此功能仅适用于旧 HiLink 后端。"
     },
     "error": {
-      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。"
+      "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。",
+      "invalid_gateway_directory": "检查原条目、网关身份、子设备目录、权限及原生程序；不会创建新身份。"
     }
   },
   "notify": {

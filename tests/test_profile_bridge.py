@@ -37,6 +37,15 @@ def fixture():
 
 
 class ProfileBridgeTests(unittest.TestCase):
+    def test_missing_or_unavailable_source_does_not_report_a_false_device_state(self):
+        for value in (None, 'unknown', 'unavailable'):
+            router, device, profile = fixture()
+            bridge = ProfileBridge(router, device, profile)
+            router._hass.states.get = lambda entity: None if value is None else SimpleNamespace(state=value, attributes={})
+            with self.subTest(state=value), self.assertRaises(ValueError):
+                bridge.snapshot()
+            self.assertFalse(router.action_dispatcher.calls)
+
     def test_internal_names_project_into_shared_cloud_service_without_mutation(self):
         router, device, profile = fixture()
         bridge = ProfileBridge(router, device, profile)

@@ -14,6 +14,15 @@ def check_openharmony_conflicts(hass, spec, entry_id=None):
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.entry_id == entry_id:
             continue
+        if entry.data.get('gateway_sn_identity') == identity:
+            raise ValueError('gateway identity already owned by the original managed entry')
+        active = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get('runtime')
+        if active and hasattr(active, 'journal_path'):
+            other = active.deployment
+            if other.port == spec.port or other.lan_port == spec.lan_port:
+                raise ValueError('gateway port already active')
+            if active.router.entities & spec.router.write_entities:
+                raise ValueError('writable entity already owned by the original managed entry')
         try:
             if backend_type(entry) != BACKEND_OPENHARMONY:
                 continue

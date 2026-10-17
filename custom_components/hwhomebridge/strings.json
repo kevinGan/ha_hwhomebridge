@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "HuaweiHome Bridge",
-        "description": "Keep one legacy HiLink entry and add independent OpenHarmony gateways without switching existing entries.",
+        "description": "For an existing integration, use Configure on its original entry to adopt the same paired gateway. This page creates one HiLink gateway or restores a verified existing pairing.",
         "data": {
           "backend": "Bridge backend"
         }
@@ -14,6 +14,14 @@
         "data": {
           "openharmony_directory": "Isolated directory"
         }
+      },
+      "existing_gateway": {
+        "title": "Existing gateway: lifecycle and engine",
+        "description": "Restore one verified existing pairing from a private directory. If the original entry exists, use its Configure page. This does not create a new cloud parent identity.",
+        "data": {
+          "gateway_directory": "Existing gateway directory",
+          "backend": "Engine"
+        }
       }
     },
     "abort": {
@@ -22,7 +30,8 @@
       "already_configured": "This backend gateway is already configured."
     },
     "error": {
-      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports."
+      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports.",
+      "invalid_gateway_directory": "Check original entry, gateway identity, catalog, permissions and native programs. No new identity is created."
     }
   },
   "options": {
@@ -57,6 +66,14 @@
         "data": {
           "openharmony_directory": "Isolated directory"
         }
+      },
+      "gateway_lifecycle": {
+        "title": "Existing gateway: lifecycle and engine",
+        "description": "Active: {active_backend}; selected: {selected_backend}; failed: {failed_backend}.\n\nRetains this entry and paired gateway. Prepare and verify the private directory offline first. Failed activation rolls back to the verified engine of this identity. A resident legacy SDK requires an HA restart. Disable/removal retains pairing.",
+        "data": {
+          "gateway_directory": "Existing gateway directory",
+          "backend": "Engine"
+        }
       }
     },
     "progress": {
@@ -70,7 +87,8 @@
       "legacy_only": "This action is available only for the legacy HiLink backend."
     },
     "error": {
-      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports."
+      "invalid_openharmony_directory": "Check the isolated directory, permissions, executable/profile hashes, duplicate gateway/directory and ports.",
+      "invalid_gateway_directory": "Check original entry, gateway identity, catalog, permissions and native programs. No new identity is created."
     }
   },
   "notify": {

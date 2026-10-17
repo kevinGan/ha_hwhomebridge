@@ -43,6 +43,9 @@ class ProfileBridge:
             for name, (internal, _) in fields.items():
                 definition = self.device.product.services[internal]
                 mapping = definition.ha_mapping
+                entity_state = self.router._hass.states.get(self.device.get_entity_for_service(internal))
+                if entity_state is None or entity_state.state in ('unavailable', 'unknown'):
+                    raise ValueError('mapped HA state unavailable')
                 if mapping.value_mapping and mapping.value_mapping.mapping_type == 'delay_to_select':
                     entity = self.device.get_entity_for_service(internal)
                     state = self.router._hass.states.get(entity)

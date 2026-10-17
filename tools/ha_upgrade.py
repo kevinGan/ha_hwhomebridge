@@ -19,7 +19,7 @@ import zipfile
 
 COMPONENT = Path("custom_components/hwhomebridge")
 PRESERVE = ("config/", "hilink_bridge/", "profile/")
-VERSION = "1.1.0b4"
+VERSION = "1.1.0b5"
 TESTED_HA = "2026.10.1"
 MAX_BYTES = 128 * 1024 * 1024
 
@@ -87,7 +87,7 @@ def payload_allowed(name):
     return (parts[0] == "translations" and len(parts) == 2 and name.endswith(".json") or
             parts[0] == "brand" and len(parts) == 2 and name.endswith(".png") or
             parts[0] == "openharmony" and (name.endswith((".py", ".json")) or
-                len(parts) == 4 and parts[1] == "bin" and parts[2] in ("x86_64", "aarch64") and parts[3] == "bridge_poc"))
+                len(parts) == 4 and parts[1] == "bin" and parts[2] in ("x86_64", "aarch64") and parts[3] in ("bridge_poc", "identity_state_probe")))
 
 
 def build(repo, output, builds):
@@ -117,6 +117,11 @@ def build(repo, output, builds):
         if info["target"] != architecture + "-linux-musl" or digest(binary) != info["artifacts"]["bridge_poc"]["sha256"]:
             raise ValueError("native build manifest mismatch")
         payload[f"openharmony/bin/{architecture}/bridge_poc"] = binary
+        probe = (directory / "identity_state_probe").read_bytes()
+        elf(probe, architecture)
+        if digest(probe) != info['artifacts']['identity_state_probe']['sha256']:
+            raise ValueError('identity probe build checksum mismatch')
+        payload[f"openharmony/bin/{architecture}/identity_state_probe"] = probe
         payload[f"openharmony/bin/{architecture}/build-info.json"] = (directory / "build-info.json").read_bytes()
         provenance[architecture] = info["source_tree_sha256"]
     manifest = {"format": 1, "kind": "hwhomebridge-preserving-upgrade", "version": VERSION,
@@ -173,6 +178,10 @@ def load_package(path, expected):
         binary = payload[f"openharmony/bin/{arch}/bridge_poc"]
         info = json.loads(payload[f"openharmony/bin/{arch}/build-info.json"])
         elf(binary, arch)
+        probe = payload[f"openharmony/bin/{arch}/identity_state_probe"]
+        elf(probe, arch)
+        if digest(probe) != info['artifacts']['identity_state_probe']['sha256']:
+            raise ValueError('identity probe checksum mismatch')
         source_hash = digest(json.dumps(info['source_files_sha256'], sort_keys=True).encode())
         if (digest(binary) != info["artifacts"]["bridge_poc"]["sha256"] or info['target'] != arch + '-linux-musl' or
                 source_hash != info['source_tree_sha256'] or source_hash != manifest['native_sources'][arch]):
@@ -344,7 +353,7 @@ def install(config, package, sha256, directory, container, probe):
                 path = staging / name
                 path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 path.write_bytes(data)
-                path.chmod(0o700 if name.endswith("/bridge_poc") else 0o600)
+                path.chmod(0o700 if name.endswith(("/bridge_poc", "/identity_state_probe")) else 0o600)
             installed = regular_tree(staging)
             for name, detail in meta["component"].items():
                 if name not in payload and '__pycache__' not in PurePosixPath(name).parts and installed.get(name) != detail:

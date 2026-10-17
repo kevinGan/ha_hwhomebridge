@@ -122,7 +122,8 @@ static struct HaChild *find_child(const char *device_id) {
 }
 int PocHaInit(const char *parent_sn, bool enabled) {
     if (!enabled) return 0;
-    if (!parent_sn || strncmp(parent_sn, "OHPOC-", 6) || strlen(parent_sn) >= 40) return -1;
+    if (!parent_sn || !parent_sn[0] || strlen(parent_sn) >= 40 ||
+        strspn(parent_sn, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != strlen(parent_sn)) return -1;
     int fd = open("ha-children.local.json", O_RDONLY | O_NOFOLLOW);
     struct stat st;
     if (fd < 0) return -1;

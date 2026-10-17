@@ -5,6 +5,8 @@ DOMAIN = "hwhomebridge"
 CONF_BACKEND = "backend"
 CONF_OH_DIRECTORY = "openharmony_directory"
 CONF_BACKEND_TYPE = "backend_type"
+CONF_GATEWAY_DIRECTORY = "gateway_directory"
+CONF_GATEWAY_REVISION = "gateway_revision"
 BACKEND_LEGACY = "legacy"
 BACKEND_OPENHARMONY = "openharmony"
 BACKEND_DISABLED = "disabled"
@@ -22,6 +24,8 @@ def configured_backend(entry):
 def backend_type(entry):
     """条目类型固定；兼容尚未写入类型的旧配置和单后端原型。"""
     kind = entry.data.get(CONF_BACKEND_TYPE)
+    if kind is None and (CONF_GATEWAY_DIRECTORY in entry.options or CONF_GATEWAY_DIRECTORY in entry.data):
+        return BACKEND_LEGACY
     if kind is None:
         selected = configured_backend(entry)
         has_openharmony_config = (
@@ -51,3 +55,7 @@ def legacy_entry_id(hass):
 # 例如社区插件 ha-huawei-smarthome（domain: huawei_smarthome）将华为设备接入 HA，
 # 若再次桥接回华为会导致设备循环。
 SKIP_PLATFORMS = {"huawei_smarthome"}
+
+
+def managed_directory(entry):
+    return entry.options.get(CONF_GATEWAY_DIRECTORY, entry.data.get(CONF_GATEWAY_DIRECTORY))

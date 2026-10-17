@@ -12,6 +12,7 @@
 import asyncio
 import logging
 import time
+import secrets
 try:
     import probatio as vol
 except ImportError:  # 兼容较早 HA 版本。
@@ -23,17 +24,20 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
 from .const import (DOMAIN, CONF_BACKEND, CONF_OH_DIRECTORY, BACKEND_LEGACY,
-                    BACKEND_OPENHARMONY, BACKEND_DISABLED, CONF_BACKEND_TYPE,
-                    configured_backend, backend_type, legacy_entry_id)
+                    BACKEND_OPENHARMONY, BACKEND_DISABLED, CONF_BACKEND_TYPE, CONF_GATEWAY_DIRECTORY, CONF_GATEWAY_REVISION,
+                    configured_backend, backend_type, legacy_entry_id, managed_directory)
 from .pin_manager import PINManager
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def backend_schema(default, kind=None):
-    choices = {BACKEND_LEGACY: "原有 HiLink", BACKEND_OPENHARMONY: "OpenHarmony 独立后端"}
+    choices = {BACKEND_LEGACY: "原有 HiLink", BACKEND_OPENHARMONY: "OpenHarmony 独立后端", "existing_gateway": "沿用已配对网关（进程托管）"}
     if kind is not None:
         choices = {kind: choices[kind], BACKEND_DISABLED: "停用"}
+    else:
+        # 正式新建入口只创建一个网关；旧实验条目仍可在原配置页维护。
+        choices.pop(BACKEND_OPENHARMONY)
     return vol.Schema({vol.Required(CONF_BACKEND, default=default): vol.In(choices)})
 
 
@@ -67,7 +71,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # 用户点击"提交"，创建配置条目
         if user_input is not None:
+            if self.hass.config_entries.async_entries(DOMAIN):
+                return self.async_abort(reason='already_configured')
             backend = user_input.get(CONF_BACKEND, BACKEND_LEGACY)
+            if backend == "existing_gateway":
+                if legacy_entry_id(self.hass) is not None:
+                    return self.async_abort(reason="already_configured")
+                return await self.async_step_existing_gateway()
             if backend not in (BACKEND_LEGACY, BACKEND_OPENHARMONY):
                 return self.async_abort(reason="invalid_backend")
             if backend == BACKEND_OPENHARMONY:
@@ -87,6 +97,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=backend_schema(BACKEND_LEGACY),
         )
+
+    async def async_step_existing_gateway(self, user_input=None):
+        from .gateway_deployment import load_gateway
+        errors = {}
+        if user_input is not None:
+            try:
+                mode = user_input[CONF_BACKEND]
+                if mode not in (BACKEND_LEGACY, BACKEND_OPENHARMONY):
+                    raise ValueError('invalid managed engine')
+                spec = await self.hass.async_add_executor_job(load_gateway, self.hass.config.config_dir,
+                    user_input[CONF_GATEWAY_DIRECTORY], DOMAIN)
+                await self.hass.async_add_executor_job(spec.verify_engine, mode)
+            except (OSError, ValueError, KeyError):
+                errors['base'] = 'invalid_gateway_directory'
+            else:
+                await self.async_set_unique_id(DOMAIN)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title='Huawei HA Gateway', data={**user_input,
+                    CONF_BACKEND_TYPE: BACKEND_LEGACY, CONF_GATEWAY_REVISION: secrets.token_hex(8)})
+        return self.async_show_form(step_id='existing_gateway', errors=errors, data_schema=vol.Schema({
+            vol.Required(CONF_GATEWAY_DIRECTORY, default='.storage/hwhomebridge/gateways/current'): str,
+            vol.Required(CONF_BACKEND, default=BACKEND_LEGACY): vol.In({BACKEND_LEGACY:'HiLink', BACKEND_OPENHARMONY:'OpenHarmony'})}))
 
     async def async_step_openharmony(self, user_input=None):
         errors = {}
@@ -143,19 +175,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """
         if user_input is not None:
             action = user_input.get("action")
+            if action == "gateway_lifecycle":
+                return await self.async_step_gateway_lifecycle()
             if action == "backend":
                 return await self.async_step_backend()
             if action == "pin_binding":
-                if configured_backend(self.config_entry) != BACKEND_LEGACY:
+                if configured_backend(self.config_entry) != BACKEND_LEGACY or managed_directory(self.config_entry):
                     return self.async_abort(reason="legacy_only")
                 return await self.async_step_pin_binding()
             elif action == "device_management":
-                if configured_backend(self.config_entry) != BACKEND_LEGACY:
+                if configured_backend(self.config_entry) != BACKEND_LEGACY or managed_directory(self.config_entry):
                     return self.async_abort(reason="legacy_only")
                 return await self.async_step_select_device()
 
         actions = {"backend": "桥接后端 / 启用与回退"}
-        if configured_backend(self.config_entry) == BACKEND_LEGACY:
+        if backend_type(self.config_entry) == BACKEND_LEGACY:
+            actions["gateway_lifecycle"] = "接管当前网关 / 后端切换"
+        if configured_backend(self.config_entry) == BACKEND_LEGACY and not managed_directory(self.config_entry):
             actions = {"pin_binding": "PIN绑定", "device_management": "设备管理", **actions}
         
         # 显示选择菜单
@@ -166,7 +202,41 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             }),
         )
 
+    async def async_step_gateway_lifecycle(self, user_input=None):
+        from .gateway_deployment import load_gateway
+        errors = {}
+        default = managed_directory(self.config_entry) or '.storage/hwhomebridge/gateways/current'
+        if user_input is not None:
+            mode = user_input[CONF_BACKEND]
+            try:
+                if mode not in (BACKEND_LEGACY, BACKEND_OPENHARMONY, BACKEND_DISABLED):
+                    raise ValueError('unknown backend')
+                if mode != BACKEND_DISABLED:
+                    spec = await self.hass.async_add_executor_job(load_gateway, self.hass.config.config_dir,
+                        user_input[CONF_GATEWAY_DIRECTORY], self.config_entry.unique_id)
+                    await self.hass.async_add_executor_job(spec.verify_engine, mode)
+                    existing = self.config_entry.data.get('gateway_identity')
+                    if existing and existing != spec.identity:
+                        raise ValueError('existing gateway identity cannot change')
+            except (OSError, ValueError, KeyError, RuntimeError):
+                errors['base'] = 'invalid_gateway_directory'
+            else:
+                return self._backend_result({**self.config_entry.options, **user_input,
+                    CONF_GATEWAY_REVISION: secrets.token_hex(8)})
+        current = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        runtime = current.get('runtime')
+        return self.async_show_form(step_id='gateway_lifecycle', errors=errors,
+            description_placeholders={'active_backend':current.get('backend', BACKEND_DISABLED),
+                'selected_backend':configured_backend(self.config_entry),
+                'failed_backend':(runtime.state.get('failed_backend') if runtime else None) or '—'},
+            data_schema=vol.Schema({
+            vol.Required(CONF_GATEWAY_DIRECTORY, default=default): str,
+            vol.Required(CONF_BACKEND, default=configured_backend(self.config_entry)): vol.In({
+                BACKEND_LEGACY: '原 HiLink SDK', BACKEND_OPENHARMONY: 'OpenHarmony', BACKEND_DISABLED: '停用'})}))
+
     async def async_step_backend(self, user_input=None):
+        if managed_directory(self.config_entry):
+            return await self.async_step_gateway_lifecycle(user_input)
         if user_input is not None:
             mode = user_input.get(CONF_BACKEND)
             if mode not in (backend_type(self.config_entry), BACKEND_DISABLED):
@@ -206,7 +276,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     
     async def async_step_pin_binding(self, user_input=None):
         """PIN绑定入口：生成PIN码并显示"""
-        if configured_backend(self.config_entry) != BACKEND_LEGACY:
+        if configured_backend(self.config_entry) != BACKEND_LEGACY or managed_directory(self.config_entry):
             return self.async_abort(reason="legacy_only")
         pin_code = PINManager.generate_pin()
         _LOGGER.info("Generated PIN for binding")
@@ -262,7 +332,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_select_device(self, user_input=None):
         """设备管理：显示已接入设备列表，支持添加/移除桥接
         """
-        if configured_backend(self.config_entry) != BACKEND_LEGACY:
+        if configured_backend(self.config_entry) != BACKEND_LEGACY or managed_directory(self.config_entry):
             return self.async_abort(reason="legacy_only")
         from .hwbridge import service_router
         

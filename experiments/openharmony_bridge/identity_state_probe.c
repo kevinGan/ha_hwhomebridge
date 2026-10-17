@@ -41,7 +41,8 @@ int main(int argc, char **argv) {
     const char *required[] = {"sn", "prodId", "model", "devTypeId", "devTypeName", "manuId", "manuName", "devName", "ac_key_hex"};
     for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); ++i)
         if (!field(root, required[i])) return 2;
-    if (strncmp(field(root, "sn"), "OHPOC-", 6)) return 2;
+    if (!field(root, "sn")[0] || strlen(field(root, "sn")) > 39 ||
+        strspn(field(root, "sn"), "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != strlen(field(root, "sn"))) return 2;
     const char *hex = field(root, "ac_key_hex");
     if (strlen(hex) != 96 || strspn(hex, "0123456789abcdefABCDEF") != 96) return 2;
     for (size_t i = 0; i < sizeof(ac_key); ++i) {

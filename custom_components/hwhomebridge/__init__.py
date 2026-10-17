@@ -10,7 +10,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (DOMAIN, BACKEND_LEGACY, BACKEND_OPENHARMONY, BACKEND_DISABLED,
-                    CONF_OH_DIRECTORY, CONF_BACKEND_TYPE, configured_backend, backend_type, legacy_entry_id)
+                    CONF_OH_DIRECTORY, CONF_BACKEND_TYPE, CONF_GATEWAY_DIRECTORY, CONF_GATEWAY_REVISION, configured_backend, backend_type, legacy_entry_id)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,10 +33,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         runtime = None
         try:
             kind, mode = backend_type(entry), configured_backend(entry)
-            if mode not in (kind, BACKEND_DISABLED):
+            managed = entry.options.get(CONF_GATEWAY_DIRECTORY, entry.data.get(CONF_GATEWAY_DIRECTORY))
+            if not managed and mode not in (kind, BACKEND_DISABLED):
                 raise ValueError("entry backend type is fixed; add a separate entry")
             identity = entry.unique_id
-            if kind == BACKEND_OPENHARMONY:
+            if managed:
+                if kind != BACKEND_LEGACY:
+                    raise ValueError('adoption must retain the original legacy entry')
+                if data.get('legacy_attempted'):
+                    raise RuntimeError('resident legacy SDK requires HA restart before managed adoption')
+                if mode != BACKEND_DISABLED:
+                    from .gateway_deployment import load_gateway
+                    from .gateway_lifecycle import GatewayLifecycle
+                    spec = await hass.async_add_executor_job(load_gateway, hass.config.config_dir, managed, entry.unique_id)
+                    from .backend_entries import openharmony_unique_id
+                    sn_identity = openharmony_unique_id(spec.root['sn'])
+                    for other in hass.config_entries.async_entries(DOMAIN):
+                        if other.entry_id == entry.entry_id:
+                            continue
+                        directory = other.options.get(CONF_GATEWAY_DIRECTORY, other.data.get(CONF_GATEWAY_DIRECTORY))
+                        if (directory == managed or other.data.get('gateway_identity') == spec.identity
+                                or other.unique_id == sn_identity or other.data.get('gateway_sn_identity') == sn_identity):
+                            raise ValueError('gateway identity/directory already owned by another entry')
+                        active = data.get(other.entry_id, {}).get('runtime')
+                        if active and (active.deployment.port == spec.port or active.deployment.lan_port == spec.lan_port):
+                            raise ValueError('gateway ports already owned by another entry')
+                    runtime = GatewayLifecycle(hass, spec, entry.entry_id)
+                    runtime.relative_directory = managed
+                    await runtime.start(mode, entry.options.get(CONF_GATEWAY_REVISION,
+                        entry.data.get(CONF_GATEWAY_REVISION, 'initial')))
+                    mode = runtime.active
+                    for device in runtime.router.manager.get_all_devices():
+                        source = dr.async_get(hass).async_get(device.ha_device_id)
+                        dr.async_get(hass).async_get_or_create(config_entry_id=entry.entry_id,
+                            identifiers={(DOMAIN, entry.entry_id, device.sn)},
+                            name=(source.name_by_user or source.name) if source else device.product.name,
+                            model=device.product.name)
+                    hass.config_entries.async_update_entry(entry, data={**entry.data,
+                        'gateway_identity': spec.identity, 'gateway_sn_identity': sn_identity})
+            elif kind == BACKEND_OPENHARMONY:
                 from .backend_entries import check_openharmony_conflicts
                 from .openharmony.deployment import load_deployment
                 from .openharmony.ha_backend import HAOpenHarmonyBackend
@@ -52,9 +87,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 raise ValueError("only one legacy SDK entry is allowed")
             if kind == BACKEND_LEGACY:
                 identity = DOMAIN
-            hass.config_entries.async_update_entry(entry,
-                data={**entry.data, CONF_BACKEND_TYPE: kind}, unique_id=identity)
-            if mode == BACKEND_LEGACY:
+            if not managed:
+                hass.config_entries.async_update_entry(entry,
+                    data={**entry.data, CONF_BACKEND_TYPE: kind}, unique_id=identity)
+            if mode == BACKEND_LEGACY and not managed:
                 await _start_legacy_once(hass)
                 await _setup_legacy_entry(hass, entry)
         except (OSError, ValueError, KeyError, RuntimeError, TimeoutError) as error:
@@ -67,7 +103,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             async def stop_on_shutdown(_event):
                 await runtime.stop()
             entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop_on_shutdown))
-            runtime.watch(entry.entry_id)
+            if not managed:
+                runtime.watch(entry.entry_id)
     return True
 
 
@@ -83,8 +120,9 @@ async def _backend_options_updated(hass, entry):
     data = hass.data[DOMAIN]
     current = data.get(entry.entry_id)
     desired = configured_backend(entry)
+    managed = entry.options.get(CONF_GATEWAY_DIRECTORY, entry.data.get(CONF_GATEWAY_DIRECTORY))
     if (backend_type(entry) == BACKEND_LEGACY and data.get("legacy_attempted")
-            and desired != BACKEND_LEGACY):
+            and (managed or desired != BACKEND_LEGACY)):
         from homeassistant.components import persistent_notification
         persistent_notification.async_create(hass,
             "后端选择已保存。旧后端无法在当前进程中完全卸载，请重启 Home Assistant 后应用新的选择。",
@@ -93,6 +131,9 @@ async def _backend_options_updated(hass, entry):
     if current is None:
         if entry.disabled_by is None:
             await hass.config_entries.async_reload(entry.entry_id)
+        return
+    if managed:
+        await hass.config_entries.async_reload(entry.entry_id)
         return
     directory = entry.options.get(CONF_OH_DIRECTORY, entry.data.get(CONF_OH_DIRECTORY))
     if desired != current["backend"] or (desired == BACKEND_OPENHARMONY and directory != current["runtime"].relative_directory):
@@ -128,7 +169,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """停止自有 OpenHarmony 子进程，或按原方式置空旧库回调。"""
     data = hass.data.setdefault(DOMAIN, {})
     active = data.get(entry.entry_id)
-    if active and active["backend"] == BACKEND_OPENHARMONY:
+    if active and active.get("runtime") is not None:
         await active["runtime"].stop()
     elif active and active["backend"] == BACKEND_LEGACY:
         from .hwbridge import nullify_hilink_callbacks
@@ -144,7 +185,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     再 async_remove_entry（此时 C 库可用，exit_brg 可正常调用）。
     """
     # OpenHarmony 删除配置只停止自有进程，绝不解绑或清理配对目录。
-    if backend_type(entry) != BACKEND_LEGACY:
+    if (backend_type(entry) != BACKEND_LEGACY
+            or entry.options.get(CONF_GATEWAY_DIRECTORY, entry.data.get(CONF_GATEWAY_DIRECTORY))):
         return
     from .hwbridge import stop_hw_hilink_bridge
 
