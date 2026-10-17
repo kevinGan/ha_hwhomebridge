@@ -1,6 +1,6 @@
 # OpenHarmony 唯一引擎隔离评估
 
-核查日期：2026-10-17。**单引擎共用网关，以及旧 SDK 独立测试身份的接管、冷重启和回退闭环均已通过。** 本轮新增结果见[旧身份导入记录](legacy-identity-offline-import.md)，仅覆盖一盏虚拟旧灯；全旧品类、ARM 实际运行和正式 HA 配置流迁移仍未验收。 因此还不能替换原 HA 的网关，也没有生成可以承诺无损迁移的正式安装包。
+核查日期：2026-10-17。**单引擎共用网关，以及旧 SDK 独立测试身份的接管、冷重启和回退闭环均已通过。** 本轮新增结果见[旧身份导入记录](legacy-identity-offline-import.md)，首次覆盖一盏虚拟旧灯；后续[多子设备与 ARM 实测](legacy-multi-arm-evaluation.md)已扩展旧001–008和同一父身份的15张子卡，正式 HA 生命周期迁移仍未验收。 因此还不能替换原 HA 的网关，也没有生成可以承诺无损迁移的正式安装包。
 
 机器记录：[上轮单引擎评估](../../experiments/openharmony_bridge/evidence/single-engine-evaluation.json)、[本轮身份接管与回退](../../experiments/openharmony_bridge/evidence/legacy-identity-handover-evaluation.json)。原 SDK 的[源码/扩展调查](legacy-native-public-source-research.md)仍有效；旧库扩展门槛没有因为另一引擎的新身份实验通过而变成通过。
 

@@ -31,7 +31,7 @@ struct HaChild {
     int on, attempts, timer;
     enum ChildPhase phase;
 };
-static struct HaChild children[24], *current;
+static struct HaChild children[64], *current;
 static size_t child_count;
 static int ha_timer = -1;
 static cJSON *definitions;
@@ -127,11 +127,11 @@ int PocHaInit(const char *parent_sn, bool enabled) {
     struct stat st;
     if (fd < 0) return -1;
     if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != getuid() || (st.st_mode & 077) ||
-        st.st_size <= 0 || st.st_size > 32768) { close(fd); return -1; }
-    char data[32769]; ssize_t count = read(fd, data, sizeof(data) - 1); close(fd);
+        st.st_size <= 0 || st.st_size > 131072) { close(fd); return -1; }
+    char data[131073]; ssize_t count = read(fd, data, sizeof(data) - 1); close(fd);
     if (count != st.st_size || memchr(data, 0, (size_t)count)) return -1;
     data[count] = 0; definitions = cJSON_ParseWithOpts(data, NULL, true);
-    if (!cJSON_IsArray(definitions) || cJSON_GetArraySize(definitions) < 1 || cJSON_GetArraySize(definitions) > 24) return -1;
+    if (!cJSON_IsArray(definitions) || cJSON_GetArraySize(definitions) < 1 || cJSON_GetArraySize(definitions) > 64) return -1;
     child_count = (size_t)cJSON_GetArraySize(definitions);
     for (size_t i = 0; i < child_count; ++i) {
         current = &children[i]; ha_child.definition = cJSON_GetArrayItem(definitions, (int)i);
@@ -162,6 +162,8 @@ int PocHaInit(const char *parent_sn, bool enabled) {
         if (hash_hex(input, ha_child.udid) || restore()) return -1;
         if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "existing_cloud_only")) &&
             !ha_child.dev_id[0]) return -1;
+        for (size_t j = 0; j < i; ++j)
+            if (ha_child.dev_id[0] && !strcmp(children[j].dev_id, ha_child.dev_id)) return -1;
     }
     return 0;
 }

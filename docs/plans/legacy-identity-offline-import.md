@@ -1,6 +1,6 @@
 # 旧 SDK 测试身份离线导入
 
-范围：只处理 `single-engine-virtual-only` 实验目录。此入口不是原 HA 安装器，不能传入家庭网关资料。当前支持经过核对的 amd64 SDK 二进制、根配置 v3，以及只有一盏虚拟旧灯的子设备配置 v4；其他版本和多子设备布局拒绝转换。
+范围：只处理 `single-engine-virtual-only` 实验目录。此入口不是原 HA 安装器，不能传入家庭网关资料。当前支持经过核对的 amd64 SDK 二进制、根配置 v3、子配置 v4。后续已补齐多子设备及 ARM Linux 运行，见[多子设备与 ARM 记录](legacy-multi-arm-evaluation.md)；下文保留首次单灯接管的历史证据。
 
 ## 本轮闭环结果
 
@@ -36,7 +36,7 @@ Jev 仅对公开故障现象做任务分类，见[记录](../../experiments/open
 | 文件 | 已验证格式 | 检查 |
 | --- | --- | --- |
 | `config.cfg` | 1588 字节，头部长度 1552，版本 3 | 文件 SHA256；HMAC-SHA256 派生 AES-CBC 密钥；另一个 salt 的 HKDF-SHA256 解开 UID 摘要 |
-| `bridge.cfg` | 5192 字节，长度 5136，版本 4 | 旧 SDK 的 SHA256 范围、salt 和 AES-CBC；只接受一条云端 ID/SN 记录，剩余区域必须为零 |
+| `bridge.cfg` | 5192 字节，长度 5136，版本 4 | 旧 SDK 的 SHA256 范围、salt 和 AES-CBC；首次核对单条记录；现接受最多64条，逐条校验ID/SN及空闲区域 |
 | `dev_data` | OpenHarmony 512 字节配置加 56 字节头部 | 48 字节 AC 和产品 UDID 参与 HKDF；AES-GCM |
 | `conn_data` | OpenHarmony 128 字节连接配置加 56 字节头部 | HKDF 后的 HMAC-SHA256，已联网标志 |
 
@@ -50,7 +50,7 @@ Jev 仅对公开故障现象做任务分类，见[记录](../../experiments/open
 
 保留旧灯 SN 和原云端 `devId`。`existing_cloud_only` 模式只请求该 ID 上线和读写，跳过 `batchBind`、`devInfoSync`，不更改云端已有 UDID、型号、MAC 或父关系。目标文件里的 UDID 只是实验 C 读取器的本地一致性标记，不宣称已经解出旧云端 UDID。缺少原云端 ID 时直接拒绝，不退化为新增绑定。
 
-这限制了实验范围：原云端资料的增删和更新、多子设备迁移、其他旧品类及正式 HA 宿主仍须后续验证。
+原云端资料更新及正式 HA 宿主仍须后续验证；多子设备和其余旧品类的当前结果见后续 ARM 记录。
 
 ## 操作顺序
 

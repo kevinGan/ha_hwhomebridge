@@ -76,15 +76,20 @@ def decode(config, bridge, ac, mac):
     child_key = hmac.digest(material, bridge[40:56], 'sha256')
     children = decrypt(bridge[56:], child_key)
     count = struct.unpack_from('<I', children)[0]
-    if count != 1 or any(children[4:16]) or any(children[96:]):
-        raise ValueError('only the verified one-child test layout is supported')
-    child_id, child_sn = text(children[16:56]), text(children[56:96])
-    if str(uuid.UUID(child_id)) != child_id or not re.fullmatch(r'HB[0-9a-f]{14}', child_sn):
-        raise ValueError('legacy child identity rejected')
+    if not 1 <= count <= 64 or any(children[4:16]) or any(children[16 + count * 80:]) or any(children[-16:]):
+        raise ValueError('invalid bounded legacy child records')
+    records = []
+    for offset in range(16, 16 + count * 80, 80):
+        child_id, child_sn = text(children[offset:offset + 40]), text(children[offset + 40:offset + 80])
+        if str(uuid.UUID(child_id)) != child_id or not re.fullmatch(r'HB[0-9a-f]{14}', child_sn):
+            raise ValueError('legacy child identity rejected')
+        records.append({'dev_id': child_id, 'sn': child_sn})
+    if len({row['dev_id'] for row in records}) != count or len({row['sn'] for row in records}) != count:
+        raise ValueError('duplicate legacy child identity')
     return dict(dev_id=root_id, secret=secret, psk=login[80:96],
                 url=text(config[172:236]), backup_url='',
                 uid_hash=uid.decode(), auth_id=auth_id, auth_code=decrypt(config[440:456], key),
-                child_id=child_id, child_sn=child_sn)
+                children=records, child_id=records[0]['dev_id'], child_sn=records[0]['sn'])
 
 
 def fixed(value, width):
@@ -125,14 +130,14 @@ def build_store(identity, gateway, port):
             'conn_data': encode_store(b'\1\2' + bytes(126), ac, udid, encrypted=False)}
 
 
-def prepare(root, output, mac, port, sdk):
+def prepare(root, output, mac, port, sdk, *, include_new_children=False):
     private_root(root)
     with (root / 'engine-owner.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return prepare_locked(root, output, mac, port, sdk)
+        return prepare_locked(root, output, mac, port, sdk, include_new_children=include_new_children)
 
 
-def prepare_locked(root, output, mac, port, sdk):
+def prepare_locked(root, output, mac, port, sdk, *, include_new_children=False):
     for directory in (root / 'legacy', root / 'runtime'):
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError('owned test input directories required')
@@ -147,9 +152,23 @@ def prepare_locked(root, output, mac, port, sdk):
     sources = {name: private_read(root / 'legacy' / name) for name in ('config.cfg', 'bridge.cfg')}
     identity = decode(sources['config.cfg'], sources['bridge.cfg'], ac, mac)
     catalog = json.loads(private_read(root / 'runtime/ha-children.local.json'))
-    child = next(item for item in catalog if item['key'] == 'legacy-light')
-    if child['sn'] != identity['child_sn'] or child['pid'] != '9MU7':
-        raise ValueError('old child does not match the fake light catalog')
+    from legacy_category_fixture import CLOUD_PIDS
+    new_catalog = [row for row in catalog if row.get('pid') not in CLOUD_PIDS.values()] if include_new_children else []
+    if len(catalog) > 64 or any(not re.fullmatch(r'[a-z0-9-]{1,31}', row['key']) for row in catalog):
+        raise ValueError('bounded safe catalog required')
+    if (len({row['key'] for row in catalog}) != len(catalog)
+            or len({row['sn'] for row in catalog}) != len(catalog)):
+        raise ValueError('old and new children must have unique keys and SNs')
+    catalog = [row for row in catalog if row.get('pid') in CLOUD_PIDS.values()]
+    records = {row['sn']: row for row in identity['children']}
+    if (len(catalog) != len(records) or {row['sn'] for row in catalog} != set(records)
+            or len({row['key'] for row in catalog}) != len(catalog)):
+        raise ValueError('catalog must cover every old child exactly once')
+    for row in catalog:
+        if (not re.fullmatch(r'[a-z0-9-]{1,31}', row['key'])
+                or CLOUD_PIDS.get(row.get('framework_pid')) != row['pid']
+                or row.get('sdk_index') != int(row['framework_pid']) - 1):
+            raise ValueError('verified old product catalog required')
     # 创建新目录，绝不覆盖旧 KV 或已有 OpenHarmony 配对存储。
     output.mkdir(mode=0o700)
     state = output / 'sdk-state'
@@ -157,17 +176,27 @@ def prepare_locked(root, output, mac, port, sdk):
     for name, data in build_store(identity, gateway, port).items():
         (state / name).write_bytes(data)
         (state / name).chmod(0o600)
-    child = {**child, 'existing_cloud_only': True}
-    child_state = {'version': 1, 'parent_sn': gateway['sn'], 'sn': identity['child_sn'],
-                   'udid': digest(('OpenHarmonyHAlegacy-light' + identity['child_sn']).encode()),
-                   'devId': identity['child_id'], 'on': 0}
+    imported_catalog, child_receipts = [], []
+    for child in catalog:
+        record = records[child['sn']]
+        imported_catalog.append({**child, 'existing_cloud_only': True})
+        child_state = {'version': 1, 'parent_sn': gateway['sn'], 'sn': child['sn'],
+                       'udid': digest(('OpenHarmonyHA' + child['key'] + child['sn']).encode()),
+                       'devId': record['dev_id'], 'on': 0}
+        path = output / ('ha-child-' + child['key'] + '.json')
+        path.write_text(json.dumps(child_state, indent=2))
+        path.chmod(0o600)
+        child_receipts.append({'key': child['key'], 'id_sha256': digest(record['dev_id'].encode()),
+                               'sn_sha256': digest(child['sn'].encode())})
+    imported_catalog.extend(new_catalog)
     gateway = {**gateway, 'enable_virtual_child': False}
-    for name, value in [('ha-children.local.json', [child]), ('ha-child-legacy-light.json', child_state),
-                        ('gateway.local.json', gateway)]:
+    for name, value in [('ha-children.local.json', imported_catalog), ('gateway.local.json', gateway)]:
         (output / name).write_text(json.dumps(value, indent=2))
         (output / name).chmod(0o600)
-    receipt = {'version': 1, 'offline_only': True, 'live_takeover_verified': False,
-               'source_mac_required': True, 'cloud_port': port, 'child_metadata_sync': False,
+    receipt = {'version': 2, 'children': child_receipts, 'new_child_keys': [row['key'] for row in new_catalog],
+               'source_catalog_sha256': digest(private_read(root / 'runtime/ha-children.local.json')),
+               'target_catalog_sha256': digest(private_read(output / 'ha-children.local.json')), 'offline_only': True, 'live_takeover_verified': False,
+               'source_mac_required': True, 'cloud_port': port, 'existing_child_metadata_sync': False,
                'legacy_sdk_sha256': SDK_SHA256,
                'source_sha256': {name: digest(data) for name, data in sources.items()},
                'root_id_sha256': digest(identity['dev_id'].encode()),
@@ -188,7 +217,8 @@ if __name__ == '__main__':
     parser.add_argument('--legacy-mac', required=True)
     parser.add_argument('--cloud-port', type=int, required=True)
     parser.add_argument('--legacy-sdk', type=Path, required=True)
+    parser.add_argument('--include-new-children', action='store_true', help='also register the explicitly configured virtual fan supplements under the same parent')
     args = parser.parse_args()
     os.umask(0o077)
-    prepare(args.root, args.output, args.legacy_mac, args.cloud_port, args.legacy_sdk)
+    prepare(args.root, args.output, args.legacy_mac, args.cloud_port, args.legacy_sdk, include_new_children=args.include_new_children)
     print(json.dumps({'offline_conversion': True, 'source_unchanged': True, 'live_takeover_verified': False}))

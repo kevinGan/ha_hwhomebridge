@@ -124,7 +124,9 @@ async def serve(root, port):
     await device_registry.async_load(hass, load_empty=True)
     await entity_registry.async_load(hass, load_empty=True)
     actor = DeviceTransport(instance)
-    actor.bind(roles.values())
+    from legacy_category_fixture import add_states, install
+    add_states(root, actor)
+    actor.bind(actor.data)
     state_file = root / 'virtual-device-state.private.json'
     if state_file.exists():
         restored = json.loads(state_file.read_text())
@@ -139,12 +141,18 @@ async def serve(root, port):
         save(state_file, actor.data)
     sync()
     async def service(call):
-        actor.call(call.domain, call.service, call.data['entity_id'], **{key: value for key, value in call.data.items() if key != 'entity_id'})
+        if call.data['entity_id'] not in actor.allowed:
+            raise ValueError('entity outside virtual fixture')
+        if call.domain == 'select' and call.service == 'select_option':
+            actor.data[call.data['entity_id']]['state'] = call.data['option']
+        else:
+            actor.call(call.domain, call.service, call.data['entity_id'], **{key: value for key, value in call.data.items() if key != 'entity_id'})
         sync()
     transport_module = load('ha_transport')
     for domain, actions in transport_module.ScopedTransport.ACTIONS.items():
         for action in actions:
             hass.services.async_register(domain, action, service)
+    hass.services.async_register('select', 'select_option', service)
     previous = load('service_router').ServiceRouter()
     previous.set_hass(hass)
     if not await previous.load_product_registry(str(COMPONENT / 'config/product_registry.json')):
@@ -170,11 +178,8 @@ async def serve(root, port):
     catalog = router.registry.catalog(router.devices)
     for row in catalog:
         row['sn'] = router.devices[row['key']].sn
-    profile = json.loads((Path(__file__).parent / 'evidence/9MU7-profile.json').read_text())
-    catalog.append({'key': 'legacy-light', 'pid': '9MU7', 'sn': primary.sn,
-        'devType': profile['deviceTypeId'], 'manu': profile['manufacturerId'],
-        'model': profile['deviceModel'], 'protType': 6,
-        'services': {sid: svc.service_type for sid, svc in primary.product.services.items()}})
+    legacy_bridges, legacy_catalog = install(root, previous, primary)
+    catalog.extend(legacy_catalog)
     save(root / 'runtime/ha-children.local.json', catalog)
     save(root / 'catalog-proof.json', {'one_parent': True, 'child_count': len(catalog),
         'old_framework_pid': primary.product.pid, 'old_cloud_pid': '9MU7',
@@ -183,8 +188,8 @@ async def serve(root, port):
         'duplicate_main_light': False, 'new_root_created_by_backend': False})
     request_lock = threading.Lock()
     def snapshot(key):
-        if key == 'legacy-light':
-            return {sid: json.loads(router.get_char_state(primary.sn, sid)) for sid in primary.product.services}
+        if key in legacy_bridges:
+            return legacy_bridges[key].snapshot()
         return router.snapshot(key)
     def invoke(data):
         key = data['key']
@@ -192,16 +197,13 @@ async def serve(root, port):
             raise ValueError('unknown child')
         if 'sid' in data:
             sid, payload = data['sid'], data['data']
-            if key == 'legacy-light':
-                schema = primary.product.services.get(sid)
-                if schema is None or not isinstance(payload, dict) or set(payload) != {schema.char_name}:
-                    raise ValueError('invalid legacy service payload')
-                router.registry.validate_value('002', sid, schema.char_name, payload[schema.char_name], write=True)
-                if not router.route_action(primary.sn, payload):
-                    raise ValueError('legacy routing failed')
+            if key in legacy_bridges:
+                legacy_bridges[key].write(sid, payload)
                 deadline = time.monotonic() + 5
                 def confirmed():
                     actual = snapshot(key)[sid]
+                    if sid == 'delay':
+                        return actual['action'] == (2 if payload['action'] == 2 else 0)
                     # 原路由将亮度量化到255级；读取原值，不回显请求值。
                     return all(name in actual and abs(actual[name] - value) <= (1 if sid == 'brightness' else 0)
                                for name, value in payload.items())
@@ -216,6 +218,7 @@ async def serve(root, port):
         def log_message(self, *_):
             pass
         def do_POST(self):
+            data = {}
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if self.path != '/bridge' or not 0 < size <= 16384:
@@ -223,7 +226,8 @@ async def serve(root, port):
                 data = json.loads(self.rfile.read(size))
                 with request_lock:
                     response = {'ok': True, 'state': invoke(data)}
-            except (ValueError, KeyError, TypeError, TimeoutError):
+            except (ValueError, KeyError, TypeError, TimeoutError) as error:
+                save(root / 'last-rejected-request.private.json', {'request': data, 'error': str(error)})
                 response = {'ok': False, 'error': 'virtual fixture rejected request'}
             encoded = json.dumps(response).encode()
             self.send_response(200)

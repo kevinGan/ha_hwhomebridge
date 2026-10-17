@@ -44,9 +44,22 @@ def check(binary):
         rows[0]['sn'] = 'HBdifferent'
         run(False)
         assert hashlib.sha256(old_path.read_bytes()).hexdigest() == before
+        rows = [{'key': 'capacity-' + str(i), 'pid': '9MU7', 'devType': '119', 'manu': '002',
+                 'services': {'switch': 'switch'}} for i in range(64)]
+        run(True)
+        run(True)
+        rows.append({**rows[-1], 'key': 'capacity-64'})
+        run(False)
+        rows.pop()
+        for i in (0, 1):
+            path = root / ('ha-child-capacity-' + str(i) + '.json')
+            value = json.loads(path.read_text()); value['devId'] = 'duplicate-cloud-id'
+            path.write_text(json.dumps(value))
+        run(False)
     return {'passed': True, 'explicit_legacy_SN_preserved': True, 'default_SN_unchanged': True,
             'restart_preserves_identity': True, 'invalid_duplicate_or_replaced_SN_rejected': True,
             'imported_child_without_cloud_ID_rejected': True,
+            'capacity_64_and_overflow_rejection': True, 'duplicate_cloud_ID_rejected': True,
             'SDK_started_or_cloud_registration': False}
 
 

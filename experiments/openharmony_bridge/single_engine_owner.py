@@ -17,29 +17,36 @@ from single_engine_fixture import private_root, save
 
 class LegacyCallbacks:
     """SDK小栈线程仅投递命令或读取缓存；HTTP与SDK调用由主线程完成。"""
-    def __init__(self, child_sn, services, gateway, state, snapshot):
+    def __init__(self, catalog, gateway, state, snapshots):
+        if (not catalog or len(catalog) > 64 or len({row['sn'] for row in catalog}) != len(catalog)
+                or any(type(row['sdk_index']) is not int or not 0 <= row['sdk_index'] < 8 for row in catalog)):
+            raise ValueError('bounded unique legacy SDK inventory required')
         self.pending = deque()
-        self.update(snapshot)
-        self.buffers = {sid: C.create_string_buffer(1024) for sid in services}
+        self.children = {row['sn'].encode(): row for row in catalog}
+        self.cache, self.encoded = {}, {}
+        self.buffers = {(sn, sid): C.create_string_buffer(1024)
+                        for sn, row in self.children.items() for sid in row['services']}
+        for sn, snapshot in snapshots.items():
+            self.update(sn, snapshot)
         @C.CFUNCTYPE(None, C.c_char_p, C.c_char_p)
         def action(sn, payload):
             state['action_callbacks'] = state.get('action_callbacks', 0) + 1
-            if sn != child_sn or not payload:
+            if sn not in self.children or not payload:
                 return
             # SDK线程栈很小；回调禁止HTTP、JSON转换或再次调用SDK。
             if len(self.pending) < 32:
-                self.pending.append(payload)
+                self.pending.append((sn, payload))
             else:
-                state['light_write_rejected'] = state.get('light_write_rejected', 0) + 1
+                state['write_rejected'] = state.get('write_rejected', 0) + 1
         @C.CFUNCTYPE(C.c_int, C.c_char_p)
         def kind(sn):
-            return 1 if sn == child_sn else -1
+            return self.children[sn]['sdk_index'] if sn in self.children else -1
         @C.CFUNCTYPE(C.c_int, C.c_char_p, C.c_char_p)
         def status(sn, sid):
-            if sn != child_sn or not sid:
+            if sn not in self.children or not sid:
                 return 0
             try:
-                values = self.cache.get(sid.decode(), {})
+                values = self.cache.get(sn, {}).get(sid.decode(), {})
                 return int(next(iter(values.values()), 0))
             except Exception:
                 return 0
@@ -50,11 +57,11 @@ class LegacyCallbacks:
         def get(sn, sid):
             try:
                 name = sid.decode() if sid else ''
-                if sn != child_sn or name not in self.buffers:
+                if (sn, name) not in self.buffers:
                     state['unsupported_read_count'] = state.get('unsupported_read_count', 0) + 1
                     return 0
-                self.buffers[name].value = self.encoded[name]
-                return C.addressof(self.buffers[name])
+                self.buffers[sn, name].value = self.encoded[sn][name]
+                return C.addressof(self.buffers[sn, name])
             except Exception:
                 return 0
         @C.CFUNCTYPE(C.c_int)
@@ -64,11 +71,11 @@ class LegacyCallbacks:
         self.action, self.kind, self.status = action, kind, status
         self.notify, self.get, self.pin = notify, get, pin
 
-    def update(self, snapshot):
+    def update(self, sn, snapshot):
         encoded = {sid: json.dumps(value, separators=(',', ':')).encode() for sid, value in snapshot.items()}
         if any(len(value) >= 1024 for value in encoded.values()):
             raise ValueError('legacy cached response too large')
-        self.cache, self.encoded = snapshot, encoded
+        self.cache[sn], self.encoded[sn] = snapshot, encoded
 
 
 def verified_import(root, directory, binary, gateway):
@@ -76,7 +83,7 @@ def verified_import(root, directory, binary, gateway):
     if directory.parent != root / 'offline-import' or directory.is_symlink():
         raise ValueError('import must be inside the independent evaluation directory')
     receipt = json.loads((directory / 'import-receipt.json').read_text())
-    if receipt.get('version') != 1 or set(receipt['source_sha256']) != {'config.cfg', 'bridge.cfg'}:
+    if receipt.get('version') not in (1, 2) or set(receipt['source_sha256']) != {'config.cfg', 'bridge.cfg'}:
         raise ValueError('unsupported offline import receipt')
     for path in directory.rglob('*'):
         info = path.lstat()
@@ -98,12 +105,36 @@ def verified_import(root, directory, binary, gateway):
             or identity['fields'] != receipt['account_field_sha256']):
         raise ValueError('native reader did not confirm the imported legacy login identity')
     catalog = json.loads((directory / 'ha-children.local.json').read_text())
-    child = json.loads((directory / 'ha-child-legacy-light.json').read_text())
-    if len(catalog) != 1 or catalog[0].get('existing_cloud_only') is not True or catalog[0]['sn'] != child['sn']:
-        raise ValueError('import must use only the existing cloud child')
-    for field, expected in [('devId', 'child_id_sha256'), ('sn', 'child_sn_sha256')]:
-        if hashlib.sha256(child[field].encode()).hexdigest() != receipt[expected]:
-            raise ValueError('imported child identity mismatch')
+    if receipt['version'] == 1:
+        records = [{'key': 'legacy-light', 'id_sha256': receipt['child_id_sha256'],
+                    'sn_sha256': receipt['child_sn_sha256']}]
+    else:
+        records = receipt['children']
+        for path, field in [(root / 'runtime/ha-children.local.json', 'source_catalog_sha256'),
+                            (directory / 'ha-children.local.json', 'target_catalog_sha256')]:
+            if hashlib.sha256(path.read_bytes()).hexdigest() != receipt[field]:
+                raise ValueError('offline catalog changed')
+    new_keys = set(receipt.get('new_child_keys', []))
+    old_keys = {row['key'] for row in records}
+    if (not 1 <= len(records) <= 64 or len(catalog) > 64 or len(catalog) != len(records) + len(new_keys)
+            or len(old_keys) != len(records) or old_keys & new_keys
+            or old_keys | new_keys != {row['key'] for row in catalog}):
+        raise ValueError('import child inventory mismatch')
+    source_catalog = {row['key']: row for row in json.loads((root / 'runtime/ha-children.local.json').read_text())}
+    for row in catalog:
+        if row['key'] in new_keys:
+            if row != source_catalog.get(row['key']) or row.get('existing_cloud_only'):
+                raise ValueError('new children must exactly match the explicit source configuration')
+            continue
+        if row.get('existing_cloud_only') is not True:
+            raise ValueError('import must use existing cloud children only')
+        child = json.loads((directory / ('ha-child-' + row['key'] + '.json')).read_text())
+        record = next(value for value in records if value['key'] == row['key'])
+        if row['sn'] != child['sn'] or child['parent_sn'] != gateway['sn']:
+            raise ValueError('imported child parent or SN mismatch')
+        for field, expected in [('devId', 'id_sha256'), ('sn', 'sn_sha256')]:
+            if hashlib.sha256(child[field].encode()).hexdigest() != record[expected]:
+                raise ValueError('imported child identity mismatch')
     return directory, directory / 'gateway.local.json'
 
 
@@ -163,11 +194,12 @@ def main(root, backend, binary, import_directory=None):
     if library.HILINK_SetAutoAc(ac_buffer, 48):
         raise ValueError('test SDK AC setup failed')
     catalog = json.loads((root / 'runtime/ha-children.local.json').read_text())
-    child = next(item for item in catalog if item['key'] == 'legacy-light')
-    child_sn = child['sn'].encode()
+    catalog = [row for row in catalog if 'sdk_index' in row]
+    if not catalog or len({row['sn'] for row in catalog}) != len(catalog):
+        raise ValueError('unique old SDK test children required')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    def bridge(sid=None, data=None):
-        payload = {'key': 'legacy-light'}
+    def bridge(key, sid=None, data=None):
+        payload = {'key': key}
         if sid is not None:
             payload.update(sid=sid, data=data)
         request = urllib.request.Request('http://127.0.0.1:18089/bridge', data=json.dumps(payload).encode(),
@@ -176,16 +208,15 @@ def main(root, backend, binary, import_directory=None):
         if not response['ok']:
             raise ValueError('virtual backend rejected request')
         return response['state']
-    fields = {'on': 'switch', 'brightness': 'brightness', 'colorTemperature': 'cct'}
     for attempt in range(120):
         try:
-            snapshot = bridge()
+            snapshots = {row['sn'].encode(): bridge(row['key']) for row in catalog}
             break
         except (OSError, ValueError):
             if stop or attempt == 119:
                 raise RuntimeError('virtual backend did not become ready') from None
             time.sleep(.5)
-    callbacks = LegacyCallbacks(child_sn, child['services'], gateway, state, snapshot)
+    callbacks = LegacyCallbacks(catalog, gateway, state, snapshots)
     library.RegHomeAssistantPyCB(callbacks.action, callbacks.kind, callbacks.status, callbacks.notify, callbacks.get)
     library.RegPINQueryCallback(callbacks.pin)
     if library.main() != 0:
@@ -197,41 +228,52 @@ def main(root, backend, binary, import_directory=None):
         # 主线程拥有正常Python栈；SDK回调只使用上述缓存和有界队列。
         while callbacks.pending:
             try:
-                values = json.loads(callbacks.pending.popleft())
-                if not isinstance(values, dict) or len(values) != 1 or next(iter(values)) not in fields:
-                    raise ValueError('unsupported legacy light command')
-                cache = bridge(fields[next(iter(values))], values)
-                callbacks.update(cache)
-                state['light_write_count'] = state.get('light_write_count', 0) + 1
+                child_sn, raw = callbacks.pending.popleft()
+                values = json.loads(raw)
+                if not isinstance(values, dict) or not values:
+                    raise ValueError('invalid legacy command')
+                row = callbacks.children[child_sn]
+                cache = callbacks.cache[child_sn]
+                # 旧ABI没有SID；仅接受可唯一确定服务的字段组合。
+                candidates = [sid for sid, fields in cache.items() if set(values) <= set(fields)]
+                if len(candidates) != 1:
+                    raise ValueError('ambiguous legacy service')
+                callbacks.update(child_sn, bridge(row['key'], candidates[0], values))
+                state['write_count'] = state.get('write_count', 0) + 1
             except Exception:
-                state['light_write_rejected'] = state.get('light_write_rejected', 0) + 1
+                state['write_rejected'] = state.get('write_rejected', 0) + 1
         if time.monotonic() < next_poll:
             time.sleep(.05)
             continue
         next_poll = time.monotonic() + 1
-        try:
-            cache = bridge()
-            callbacks.update(cache)
-        except (OSError, ValueError):
-            state['backend_read_failures'] = state.get('backend_read_failures', 0) + 1
+        for child_sn, row in callbacks.children.items():
+            try:
+                callbacks.update(child_sn, bridge(row['key']))
+            except (OSError, ValueError):
+                state['backend_read_failures'] = state.get('backend_read_failures', 0) + 1
         sn = library.GetGatewaySN()
         if sn and sn.decode() != gateway['sn']:
             raise ValueError('legacy SDK did not preserve the supplied test SN')
         state['native_identity_confirmed'] = bool(sn)
         state['device_status'] = library.HILINK_GetDevStatus()
         if state['device_status'] == 1 and not registered:
-            # 已注册身份仅上线；首次新增测试灯才使用DEV_ADD。
             saved = root / 'legacy-child-submitted.json'
-            if not saved.exists():
-                library.HilinkSyncBrgDevStatus(child_sn, 3)
-                save(saved, {'sn_sha256': hashlib.sha256(child_sn).hexdigest()})
-            library.HilinkSyncBrgDevStatus(child_sn, 1)
+            previous = json.loads(saved.read_text()) if saved.exists() else {}
+            submitted = set(previous.get('children_sn_sha256', [previous.get('sn_sha256')]))
+            for child_sn in callbacks.children:
+                digest = hashlib.sha256(child_sn).hexdigest()
+                if digest not in submitted:
+                    library.HilinkSyncBrgDevStatus(child_sn, 3)
+                    submitted.add(digest)
+                    save(saved, {'children_sn_sha256': sorted(submitted - {None})})
+                library.HilinkSyncBrgDevStatus(child_sn, 1)
             registered = True
         if state['device_status'] == 1 and registered:
-            for sid, value in callbacks.encoded.items():
-                if reported.get(sid) != value:
-                    library.UpdateHAStatus(child_sn, sid.encode(), value)
-                    reported[sid] = value
+            for child_sn, services in callbacks.encoded.items():
+                for sid, value in services.items():
+                    if reported.get((child_sn, sid)) != value:
+                        library.UpdateHAStatus(child_sn, sid.encode(), value)
+                        reported[child_sn, sid] = value
         state['child_registration_submitted'] = registered
         save(root / 'engine-owner.json', state)
     state['stopped_without_unbind'] = True
