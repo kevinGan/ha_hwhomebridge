@@ -1,4 +1,4 @@
-"""独立Linux的真实Podman冷备导出验收；固定虚构身份，绝不启动SDK。"""
+"""独立Linux的真实Docker/Podman冷备导出验收；固定虚构身份，绝不启动SDK。"""
 import argparse
 import asyncio
 import hashlib
@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-def main(base, repo, sdk, image):
+def main(base, repo, sdk, image, engine='podman'):
     if base.exists():
         raise ValueError('new independent private directory required')
     base.mkdir(mode=0o700)
@@ -32,7 +32,7 @@ def main(base, repo, sdk, image):
     save(config/cold.REGISTRIES[0],{'data':{'entries':[entry,{'entry_id':'unrelated','domain':'fixture','data':{'credential':'virtual-only'}}]}})
     save(config/cold.REGISTRIES[1],{'data':{'devices':data['devices']}})
     save(config/cold.REGISTRIES[2],{'data':{'entities':data['entities']}})
-    owner=cold.ContainerOwner('podman','hwhomebridge-cold-source',config)
+    owner=cold.ContainerOwner(engine,'hwhomebridge-cold-source',config)
     mac=owner.mac('eth0');fixture.MAC=mac
     conf,bridge=fixture.legacy_bytes(data['devices'][1]['identifiers'][0][2])
     legacy=config/cold.RUNTIME/'config';legacy.mkdir(parents=True,mode=0o700)
@@ -46,12 +46,14 @@ def main(base, repo, sdk, image):
     first['two_pass_registry_stable']=True
     preflight=base/'preflight.private.json';save(preflight,first)
     source_before={n:cold.read_file(config/n)[1] for n in cold.source_files(config)}
-    created=[];result={'passed':False,'synthetic_credentials_only':True,'native_SDK_started':False}
-    def podman(*args):
-        return subprocess.run(['podman','--remote=false',*args],check=True,capture_output=True,text=True).stdout
+    created=[];result={'passed':False,'engine':engine,'synthetic_credentials_only':True,'native_SDK_started':False}
+    prefix=['podman','--remote=false'] if engine=='podman' else ['docker','--host','unix:///var/run/docker.sock']
+    def container_command(*args):
+        return subprocess.run([*prefix,*args],check=True,capture_output=True,text=True).stdout
     def create(name,*options):
-        assert subprocess.run(['podman','container','exists',name],capture_output=True).returncode==1
-        podman('create','--name',name,'--network','host','--cap-drop','ALL','--security-opt','no-new-privileges',
+        exists=['container','exists',name] if engine=='podman' else ['inspect',name]
+        assert subprocess.run([*prefix,*exists],capture_output=True).returncode==1
+        container_command('create','--name',name,'--network','host','--cap-drop','ALL','--security-opt','no-new-privileges',
             '--read-only','--mount',f'type=bind,src={config},dst=/config',*options,'--entrypoint','sleep',image,'infinity')
         created.append(name)
     def refused(name, selected=owner):
@@ -63,15 +65,15 @@ def main(base, repo, sdk, image):
         result[name]=True
     try:
         create(owner.name)
-        podman('start',owner.name)
+        container_command('start',owner.name)
         refused('actual_running_owner_refused')
-        podman('stop','-t','0',owner.name)
+        container_command('stop','-t','0',owner.name)
         create('hwhomebridge-cold-restarting','--restart','always')
-        refused('actual_restart_policy_refused',cold.ContainerOwner('podman','hwhomebridge-cold-restarting',config))
+        refused('actual_restart_policy_refused',cold.ContainerOwner(engine,'hwhomebridge-cold-restarting',config))
         create('hwhomebridge-cold-alias')
-        podman('start','hwhomebridge-cold-alias')
+        container_command('start','hwhomebridge-cold-alias')
         refused('actual_writable_alias_refused')
-        podman('stop','-t','0','hwhomebridge-cold-alias')
+        container_command('stop','-t','0','hwhomebridge-cold-alias')
         held=subprocess.Popen([sys.executable,'-S','-c',
             'import sys;f=open(sys.argv[1],"rb");print("ready",flush=True);input()',str(legacy/'config.cfg')],
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
@@ -105,7 +107,7 @@ def main(base, repo, sdk, image):
         assert not any('libhilink' in line for line in Path('/proc/self/maps').read_text().splitlines())
         result.update(source_files_and_metadata_unchanged=True,legacy_library_not_loaded=True,passed=True)
     finally:
-        for name in reversed(created):podman('rm','-f',name)
+        for name in reversed(created):container_command('rm','-f',name)
     result['all_owned_test_containers_removed']=True
     save(base/'result.json',result)
     print(json.dumps(result))
@@ -116,4 +118,5 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('base',type=Path);parser.add_argument('--repo',required=True,type=Path);parser.add_argument('--sdk',required=True,type=Path)
     parser.add_argument('--image',default='ghcr.io/home-assistant/home-assistant:2026.10.1')
-    args=parser.parse_args();main(args.base,args.repo,args.sdk,args.image)
+    parser.add_argument('--engine',choices=('docker','podman'),default='podman')
+    args=parser.parse_args();main(args.base,args.repo,args.sdk,args.image,args.engine)

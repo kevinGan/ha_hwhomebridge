@@ -72,3 +72,5 @@ python3 tools/ha_cold_export.py verify --output /secure/new-cold-export
 后续顺序：独立维护通道和原机权限预检 → 维护窗口内真实生产冷备 → 原身份离线转换和服务绑定复核 → 原生读取器及唯一网关目录验收 → 才能安排安装、启用与真实 App 控制复验。当前原生目录的 `child_sn()` 仍限定 OHPOC 父 SN，生产原 SN 尚未冷读确认；正式父 SN 规则及最终原生目录必须单独补齐、实测，不能用预检占位父身份绕过这一门槛。
 
 Jev 本轮只对在线参考副本、实体观察、停机导出候选和维护窗口证据归类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-cold-export-routing.json)。密码格式、进程权限和是否通过均由 Codex 与确定性代码核对；工具运行不依赖 AI。
+
+2026-10-17 后续：独立环境已补真实 Docker 的相同导出、验真、还原和故障拒绝，以及专用 SSH 公钥到宿主探针的验证。原机 22222 开放但现有密钥未通过认证，原机 Docker 仍未实测；原机已有日志没有旧灯路由记录，绑定歧义继续保留。详见[维护入口与 Docker 预检](production-maintenance-channel.md)。这次补充没有改变本页的生产停机、身份和接管门槛。
