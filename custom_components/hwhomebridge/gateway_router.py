@@ -7,9 +7,10 @@ from pathlib import Path
 from .ha_transport import HomeAssistantTransport, async_owned_entity_inventory
 from .profile_bridge import ProfileBridge
 from .service_router import ServiceRouter
+from .product_registry import product_fingerprint
 from .virtual_device import VirtualDevice, ServiceEntry, SNManager
 from .capability_router import CapabilityRouter
-from .openharmony.configuration import OpenHarmonyRegistry, child_sn
+from .openharmony.configuration import OpenHarmonyRegistry, managed_child_sn
 
 
 class GatewayRouter:
@@ -52,6 +53,8 @@ class GatewayRouter:
                     raise ValueError('existing vendor adapter changed')
                 adapter = choices[0]
             product = self.legacy.registry.merge(base, adapter)
+            if row.get('product_sha256') is not None and row['product_sha256'] != product_fingerprint(product):
+                raise ValueError('frozen original product mapping changed')
             device = VirtualDevice(row['sn'], product, row['source_id'])
             for sid, entity in row['entities'].items():
                 mapping = product.services[sid].ha_mapping
@@ -76,7 +79,7 @@ class GatewayRouter:
             registry_class = OpenHarmonyRegistry
         self.capabilities = await BoundRouter.create(HomeAssistantTransport(hass), deployment.directory / 'mapping', instance,
             owned_entities=composition_inventory, supported_pids={row['pid'] for row in deployment.catalog},
-            sn_manager=self.legacy.sn_manager, sn_factory=lambda parent, source, key: child_sn(parent, key))
+            sn_manager=self.legacy.sn_manager, sn_factory=lambda parent, source, key: managed_child_sn(parent, key))
         self.capabilities.set_hass(hass)
         expected = self.capabilities.registry.catalog(self.capabilities.devices)
         actual = {row['key']: {k: v for k, v in row.items() if k != 'sn'} for row in deployment.catalog

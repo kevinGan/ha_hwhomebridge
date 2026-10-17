@@ -13,6 +13,14 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 SDK_SHA256 = '0579e6f3cee0320d1533e5a96cc6d72a065a43050eff4edcb7afd6a9a52c7b58'
 
 
+def legacy_gateway_sn(raw):
+    """已核对版本用fgets(buffer,17)读SN；拒绝会截断或歧义的文件。"""
+    if (not isinstance(raw, bytes) or len(raw) != 17 or raw[-1:] not in (b'\0', b'\n')
+            or not re.fullmatch(rb'[A-Za-z0-9_-]{16}', raw[:-1])):
+        raise ValueError('unambiguous bounded legacy gateway SN required')
+    return raw[:-1].decode('ascii')
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 

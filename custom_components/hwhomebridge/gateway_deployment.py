@@ -8,7 +8,7 @@ import struct
 import socket
 import subprocess
 
-from .identity_store import SDK_SHA256, decode, digest, private_read
+from .identity_store import SDK_SHA256, decode, digest, private_read, legacy_gateway_sn
 from .openharmony.deployment import private_path
 
 
@@ -83,9 +83,15 @@ class GatewayDeployment:
 
     def verify_source(self):
         ac = private_read(self.legacy / 'device_ac')
+        raw_sn = private_read(self.legacy / 'device_sn')
+        sn = legacy_gateway_sn(raw_sn)
         if (ac.hex() != self.root['ac_key_hex']
-                or private_read(self.legacy / 'device_sn') != self.root['sn'].encode() + b'\0'):
+                or sn != self.root['sn']):
             raise ValueError('legacy and target SN/AC differ')
+        source_sn = self.receipt.get('source_sn_sha256')
+        if ((raw_sn.endswith(b'\n') and (source_sn is None or self.receipt.get('legacy_sdk_sha256') != SDK_SHA256))
+                or source_sn is not None and source_sn != digest(raw_sn)):
+            raise ValueError('original SN bytes changed or LF import proof missing')
         identity = decode(private_read(self.legacy / 'config.cfg'), private_read(self.legacy / 'bridge.cfg'),
                           ac, self.settings['source_mac'])
         fields = {key: digest(identity[key] if isinstance(identity[key], bytes) else identity[key].encode())

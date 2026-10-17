@@ -14,6 +14,17 @@ def child_sn(parent, key):
     return "OHPOC-HA-" + hashlib.sha256(f"{parent}#ha-{key}-v1".encode()).hexdigest()[:24]
 
 
+def managed_child_sn(parent, key):
+    """同一已接管网关的补充卡身份；保留已有实验卡的算法。"""
+    if isinstance(parent, str) and parent.startswith('OHPOC-'):
+        return child_sn(parent, key)
+    if not isinstance(parent, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}', parent):
+        raise ValueError('verified legacy parent SN required')
+    if not isinstance(key, str) or not re.fullmatch(r'[a-z0-9-]{1,31}', key):
+        raise ValueError('invalid child key')
+    return 'HWHB-HA-' + hashlib.sha256(f'{parent}#ha-{key}-v1'.encode()).hexdigest()[:24]
+
+
 class OpenHarmonyRegistry(CapabilityRegistry):
     def catalog(self, devices):
         result = []

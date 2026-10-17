@@ -19,9 +19,10 @@ Product Registry - 产品定义注册表（框架层 + 默认适配器 + 厂家�
 import json
 import os
 import copy
+import hashlib
 import logging
 import aiofiles
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 from .fan_mapping import validate_fan_mapping
@@ -296,6 +297,12 @@ class AdapterDef:
     match_rules: list = field(default_factory=list)  # list[MatchRule]
     services: dict = field(default_factory=dict)     # service_id -> dict of ha_mapping fields
     composition: Optional[str] = None
+
+
+def product_fingerprint(product):
+    """冻结后的完整产品映射摘要；配置改变时须重新离线核对。"""
+    raw = json.dumps(asdict(product), sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 # ---------------------------------------------------------------------------
