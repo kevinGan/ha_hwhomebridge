@@ -1,16 +1,16 @@
 # 原机独立维护入口与 Docker 只读预检
 
-2026-10-17。本轮不改集成运行代码和 b5 包，不安装、停机、重启原 HA，不调整米家自动化，也不改变原机 SSH 授权。新增工具从完整源码检出运行。
+2026-10-17。经用户明确授权，已向原机宿主追加专用公钥，保留原有授权，完成原机真实 Docker 的在线只读预检。不改集成运行代码和 b5 包，不安装、停机、重启原 HA，不调整灯光或米家自动化。工具从完整源码检出运行。
 
 ## 入口选择与目前缺口
 
 优先使用 **HA OS 宿主 SSH 的 22222 端口**。它由宿主提供，不依赖 Core 或 File editor。SSH 插件运行在容器内，不能替代冷备导出要求的宿主进程、权限和文件视图。依据：[HA OS 官方调试文档](https://developers.home-assistant.io/docs/operating-system/debugging/)。
 
-原机本轮只读检查：22222 有 SSH 服务，22 未开放，Docker TCP 2375/2376 未开放；现有两个 SSH 插件仍报错。现有本机 Ed25519 与 RSA 密钥均未通过宿主认证，因此 **原机 Docker 预检尚未执行，独立维护通道尚未打通**。没有给 Docker 开 TCP，没有启动或配置插件。
+原机检查：22222 有 SSH 服务，22 未开放，Docker TCP 2375/2376 未开放；现有两个 SSH 插件仍报错。专用公钥现已通过宿主认证，**原机独立 SSH 和真实 Docker 在线预检均通过**。没有给 Docker 开 TCP，没有启动或配置插件，也没有用停止 Core 来测试通道。
 
-已在本机私有目录生成独立 Ed25519 密钥、公钥导入文件、SSH 配置和首次观察的宿主公钥记录；不提交 Git。私钥只留本机，公钥需在后续明确授权后**追加**到宿主授权，保留现有授权。首次看到的宿主公钥还需要用可信控制台或原有维护入口核对指纹，不能把 TOFU 记录冒充带外验证。
+专用 Ed25519 私钥、公钥、SSH 配置和原机公钥清单只保存在本机私有目录，不提交 Git。通过用户已批准的指纹精确核对客户端公钥；SSH 严格核对准备阶段固定的宿主公钥记录，没有自动接受新指纹。宿主指纹没有做带外核对，不将既有 TOFU 记录冒充带外验证。
 
-官方文档说明，Supervisor 2026.09 起可通过 `/os/ssh/authorized_keys` 管理宿主公钥；另一种方式是 CONFIG USB 导入。后续先确认原机 API 版本和现有公钥清单，再审阅追加方案。不能用覆盖整个授权文件、DELETE 或重启导入来省略核对。本轮没有调用密钥修改 API，也没有执行 `ha os import`。
+原机 Supervisor 为 2026.09.3，API 已实际读取确认。按[该版本官方接口](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/api/os.py)和[追加实现](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/os/manager.py)，对固定 `/os/ssh/authorized_keys` 先 GET，再仅 POST 一条经过格式和指纹验证的公钥，最后 GET 核对。原有两条记录完整保留，清单现为三条；POST 仅一次，DELETE 为零。没有覆盖授权文件、修改插件或执行 `ha os import`。后续操作继续遵守当前授权范围，不能凭 root 通道可用就部署或启停 HA。
 
 ## 只读宿主探针
 
@@ -34,7 +34,7 @@ python3 tools/ha_host_preflight.py --host <原机地址> --port 22222 \
   --output /secure/new-host-preflight
 ```
 
-在线探针不会为了通过冷备检查而关闭自动重启，也不会给停机中的 Core 出具在线验收。端口快照不等于新后端端口已可绑定；源根权限不等于完整冷备目录全部安全；有宿主 Python 也不证明 `cryptography` 等依赖可用。**HA OS 宿主可能没有 Python**，要根据真实报告准备经过验证的离线运行时，不能把 Ubuntu 测试机依赖或 Core 容器内 Python 冒充宿主依赖，更不能临时往原 HA 安装依赖。
+在线探针不会为了通过冷备检查而关闭自动重启，也不会给停机中的 Core 出具在线验收。端口快照不等于新后端端口已可绑定；源根权限不等于完整冷备目录全部安全；有宿主 Python 也不证明 `cryptography` 等依赖可用。**本次确认原机 HA OS 宿主没有 Python**，要先在独立环境准备经过验证的离线运行时，不能把 Ubuntu 测试机依赖或 Core 容器内 Python 冒充宿主依赖，更不能临时往原 HA 安装依赖。
 
 后续冷备仍由 `ha_cold_export.py` 单独检查停机、自动重启、共享写入、可见宿主占用、完整目录一致性与身份解码。在线报告始终保持 `cold_backup=false`、`production_install_allowed=false`；单靠这些工具没有停机或部署授权。
 
@@ -58,6 +58,8 @@ python3 tools/ha_legacy_binding_audit.py --url http://<原机地址> \
 
 真实 Docker 29.1.3 的运行中、自动重启、共享写入、宿主文件占用拒绝，以及停机导出、验真、第三目录还原、篡改拒绝均通过。SSH 完整探针通过，虚构 Core 容器停止后 SSH 仍可用，在线探针对停机容器明确拒绝且不发布报告。最终源码与独立 Linux 验收源码哈希一致。Mac 168 项回归和配置校验通过；新增 12 项回归也在独立 Linux 通过。
 
-下一步顺序：审阅宿主指纹及公钥追加方案 → 授权后验证原机 SSH 和在线 Docker 探针 → 解决宿主离线运行时依赖 → 另行安排维护窗口生成真实冷备 → 审阅旧绑定和实体问题 → 原身份离线转换、正式父 SN 及原生目录验证 → 才能安排单网关安装、启用与回退。此次没有生成生产冷备，也没有更新原 HA。
+原机 HA OS 18.3、Docker 29.7.2 的 root systemd 宿主预检随后通过：配置实际挂载、普通根路径、文件 UID/GID 和模式、Core 运行 UID 0、host 网络命名空间及接口 MAC 可读取；目录与注册表的所有者符合运行 UID，原容器重启策略为 no（仅读取，没有修改）。两次检查中 Docker/Core 身份、Core 启动时间、挂载和根元数据相同。授权前后 38 个组件文件与桥接配置条目完全一致，b5 包原 SHA256 不变。原机没有停机测试、冷备、SDK KV 读取或部署。详见[本次原机记录](../../experiments/openharmony_bridge/evidence/production-host-authorized-preflight.json)，前文独立验收记录保留授权前时点的事实。
 
-本轮按 TypeSafe 技能由 Jev 对“宿主 SSH / Core 文件入口”和“配置重放 / 实际绑定证据”分类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-maintenance-routing.json)；复杂判断、身份、权限和通过条件由 Codex 与确定性代码负责。工具运行不依赖 AI。
+下一步顺序：在独立环境解决 HA OS 宿主离线运行时依赖 → 另行安排维护窗口生成真实冷备 → 审阅旧绑定和实体问题 → 原身份离线转换、正式父 SN 及原生目录验证 → 才能安排单网关安装、启用与回退。此次没有生成生产冷备，也没有更新原 HA。
+
+本轮按 TypeSafe 技能由 Jev 对“宿主 SSH / Core 文件入口”和“配置重放 / 实际绑定证据”分类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-maintenance-routing.json)；授权后又对[单条公钥追加操作](../../experiments/openharmony_bridge/evidence/jev-host-key-append-routing.json)归类。复杂判断、身份、用户授权和通过条件由 Codex 与确定性代码负责。工具运行不依赖 AI。

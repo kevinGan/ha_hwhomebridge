@@ -74,3 +74,5 @@ python3 tools/ha_cold_export.py verify --output /secure/new-cold-export
 Jev 本轮只对在线参考副本、实体观察、停机导出候选和维护窗口证据归类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-cold-export-routing.json)。密码格式、进程权限和是否通过均由 Codex 与确定性代码核对；工具运行不依赖 AI。
 
 2026-10-17 后续：独立环境已补真实 Docker 的相同导出、验真、还原和故障拒绝，以及专用 SSH 公钥到宿主探针的验证。原机 22222 开放但现有密钥未通过认证，原机 Docker 仍未实测；原机已有日志没有旧灯路由记录，绑定歧义继续保留。详见[维护入口与 Docker 预检](production-maintenance-channel.md)。这次补充没有改变本页的生产停机、身份和接管门槛。
+
+同日用户授权追加专用公钥后：原有两条授权完整保留，专用宿主 SSH 和原机 Docker 在线预检现已通过；HA/Core 没有停止或重启，组件与桥接条目不变。原机宿主确认没有 Python，因此冷备工具的宿主离线运行时仍需先在独立环境解决。本次没有生成生产冷备或验证停机后的原机通道，详见[原机脱敏记录](../../experiments/openharmony_bridge/evidence/production-host-authorized-preflight.json)。
