@@ -76,3 +76,5 @@ Jev 本轮只对在线参考副本、实体观察、停机导出候选和维护�
 2026-10-17 后续：独立环境已补真实 Docker 的相同导出、验真、还原和故障拒绝，以及专用 SSH 公钥到宿主探针的验证。原机 22222 开放但现有密钥未通过认证，原机 Docker 仍未实测；原机已有日志没有旧灯路由记录，绑定歧义继续保留。详见[维护入口与 Docker 预检](production-maintenance-channel.md)。这次补充没有改变本页的生产停机、身份和接管门槛。
 
 同日用户授权追加专用公钥后：原有两条授权完整保留，专用宿主 SSH 和原机 Docker 在线预检现已通过；HA/Core 没有停止或重启，组件与桥接条目不变。原机宿主确认没有 Python，因此冷备工具的宿主离线运行时仍需先在独立环境解决。本次没有生成生产冷备或验证停机后的原机通道，详见[原机脱敏记录](../../experiments/openharmony_bridge/evidence/production-host-authorized-preflight.json)。
+
+后续已补[免安装 Linux x86_64 冷备运行时](../portable-cold-runtime.md)，固定便携 Python 与 wheel 哈希，保留原宿主、停机和一致性检查。新增 `restore --output <冷备> --target <全新私有包装目录>`，只写新目录的 `config/`，恢复原字节、UID/GID、普通权限、修改时间及空目录，不覆盖原 HA，不创建接管目录或启动 SDK。该包在独立环境的官方 HA OS 18.3 用户空间验证，不依赖目标系统 Python；原机尚未接收或执行这个包，生产冷备与部署门槛不变。

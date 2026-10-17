@@ -248,5 +248,49 @@ class ColdExportTest(unittest.TestCase):
         self.assertFalse(result['entity_preflight_passed'])
         self.assertFalse(result['adoption_ready'])
 
+    def test_raw_restore_to_new_private_wrapper_preserves_bytes_and_metadata(self):
+        self.export();target=self.root/'restored'
+        with patch.object(cold.os,'geteuid',return_value=0):
+            result=cold.restore(self.out,target)
+        self.assertTrue(result['passed']);self.assertFalse(result['deployment_performed'])
+        self.assertEqual(target.stat().st_mode & 0o777,0o700)
+        manifest=cold.read_json(self.out/'cold-export.json')
+        for name,info in manifest['files'].items():
+            actual=(target/'config'/name).stat()
+            self.assertEqual((actual.st_uid,actual.st_gid,actual.st_mode,actual.st_mtime_ns),
+                             (info['uid'],info['gid'],info['mode'],info['mtime_ns']))
+            self.assertEqual((target/'config'/name).read_bytes(),(self.config/name).read_bytes())
+        self.assertTrue((target/'config'/cold.RUNTIME/'config/empty-private-directory').is_dir())
+
+    def test_raw_restore_never_overwrites_original_export_or_existing_target(self):
+        self.export();existing=self.root/'existing';existing.mkdir()
+        for target in (self.config/'bad',self.out/'bad',existing):
+            with patch.object(cold.os,'geteuid',return_value=0),self.assertRaises(ValueError):
+                cold.restore(self.out,target)
+        self.assertEqual(list(existing.iterdir()),[])
+
+    def test_raw_restore_requires_admin_and_refuses_tampering(self):
+        self.export();target=self.root/'restored'
+        with patch.object(cold.os,'geteuid',return_value=1234),self.assertRaises(ValueError):
+            cold.restore(self.out,target)
+        (self.out/'payload'/cold.RUNTIME/'config/device_ac').write_bytes(bytes(48))
+        with self.assertRaises(ValueError):cold.restore(self.out,target)
+        self.assertFalse(target.exists())
+
+    def test_raw_restore_refuses_special_modes_and_invalid_ownership(self):
+        self.export();path=self.out/'cold-export.json';original=json.loads(path.read_text())
+        for field,value in (('mode',0o104755),('uid',-1)):
+            manifest=copy.deepcopy(original);next(iter(manifest['files'].values()))[field]=value
+            path.write_text(json.dumps(manifest));path.chmod(0o600)
+            with patch.object(cold.os,'geteuid',return_value=0),self.assertRaises(ValueError):
+                cold.restore(self.out,self.root/'restored')
+            self.assertFalse((self.root/'restored').exists())
+
+    def test_raw_restore_failure_does_not_publish_partial_target(self):
+        self.export();target=self.root/'restored';verified=cold.verify(self.out)
+        with patch.object(cold.os,'geteuid',return_value=0),patch.object(cold,'verify',side_effect=[verified,ValueError('changed')]):
+            with self.assertRaises(ValueError):cold.restore(self.out,target)
+        self.assertFalse(target.exists())
+
 
 if __name__=='__main__':unittest.main()

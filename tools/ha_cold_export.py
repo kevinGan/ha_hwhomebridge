@@ -325,22 +325,83 @@ def verify(directory):
             'child_inventory_matches_live':manifest['identity']['child_inventory_matches_live']}
 
 
+def restore(directory, target):
+    """仅还原到全新私有包装目录下的config；绝不覆盖原HA或启动后端。"""
+    directory, target = absolute(directory), absolute(target)
+    verify(directory)
+    manifest = read_json(directory/'cold-export.json')
+    original = absolute(Path(manifest['source_config']))
+    if (target.exists() or not target.parent.is_dir() or overlap(target, directory)
+            or overlap(target, original)):
+        raise ValueError('new restore wrapper outside original config and export required')
+    if os.geteuid() != 0:
+        raise ValueError('raw restore requires the independent host admin context')
+    for records, file_type in ((manifest['files'], stat.S_ISREG), (manifest['original_directories'], stat.S_ISDIR)):
+        for name, info in records.items():
+            if (Path(name).is_absolute() or '..' in Path(name).parts or not file_type(info['mode'])
+                    or info['mode'] & 0o7000 or any(type(info[k]) is not int or not 0 <= info[k] < 2**31 for k in ('uid','gid'))):
+                raise ValueError('ordinary source metadata without special permission bits required')
+
+    def metadata(path, info):
+        current = path.stat()
+        if (current.st_uid, current.st_gid) != (info['uid'], info['gid']):
+            os.chown(path, info['uid'], info['gid'])
+        path.chmod(stat.S_IMODE(info['mode']))
+        os.utime(path, ns=(info['mtime_ns'], info['mtime_ns']))
+
+    with export_lock(target.parent), tempfile.TemporaryDirectory(prefix='.hwhomebridge-restore-', dir=target.parent) as temporary:
+        stage = Path(temporary)/'restored';stage.mkdir(mode=0o700)
+        config = stage/'config'
+        for name in manifest['original_directories']:
+            (config/name).mkdir(parents=True, exist_ok=True, mode=0o700)
+        for name, info in manifest['files'].items():
+            data = read_file(directory/'payload'/name)[0]
+            if hashlib.sha256(data).hexdigest() != info['sha256']:
+                raise ValueError('export changed during raw restore')
+            path = config/name
+            with path.open('xb') as stream:
+                stream.write(data);stream.flush();os.fsync(stream.fileno())
+            metadata(path, info)
+            actual = path.stat()
+            if (actual.st_uid, actual.st_gid, actual.st_mode, actual.st_mtime_ns) != (info['uid'], info['gid'], info['mode'], info['mtime_ns']):
+                raise ValueError('restored file metadata mismatch')
+        for name in sorted(manifest['original_directories'], key=lambda name:len(Path(name).parts), reverse=True):
+            metadata(config/name, manifest['original_directories'][name])
+        verify(directory)
+        result = {'passed':True, 'raw_restore_only':True, 'restored_files':len(manifest['files']),
+                  'original_UID_GID_modes_and_mtime_preserved':True, 'source_HA_written':False,
+                  'SDK_started':False, 'deployment_performed':False, 'adoption_ready':False}
+        with (stage/'restore.json').open('x') as stream:
+            json.dump(result, stream);stream.flush();os.fsync(stream.fileno())
+        (stage/'restore.json').chmod(0o600)
+        stage.rename(target)
+        fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:os.fsync(fd)
+        finally:os.close(fd)
+    return result
+
+
 if __name__ == '__main__':
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('export','verify'))
+    parser.add_argument('action', choices=('export','verify','restore'))
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--config',type=Path)
     parser.add_argument('--engine',choices=('docker','podman'))
     parser.add_argument('--container')
     parser.add_argument('--interface')
     parser.add_argument('--preflight',type=Path)
+    parser.add_argument('--target',type=Path, help='restore only: new private wrapper containing config/')
     args = parser.parse_args()
     try:
         if args.action == 'export':
             if not all((args.config,args.engine,args.container,args.interface,args.preflight)):
                 parser.error('export requires config, local engine/container, interface and preflight')
             result = export(args.config,args.output,ContainerOwner(args.engine,args.container,args.config),args.interface,args.preflight)
+        elif args.action == 'restore':
+            if args.target is None:
+                parser.error('restore requires a new private target wrapper')
+            result = restore(args.output,args.target)
         else:result = verify(args.output)
         print(json.dumps(result))
     except Exception:

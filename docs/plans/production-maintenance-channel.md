@@ -60,6 +60,6 @@ python3 tools/ha_legacy_binding_audit.py --url http://<原机地址> \
 
 原机 HA OS 18.3、Docker 29.7.2 的 root systemd 宿主预检随后通过：配置实际挂载、普通根路径、文件 UID/GID 和模式、Core 运行 UID 0、host 网络命名空间及接口 MAC 可读取；目录与注册表的所有者符合运行 UID，原容器重启策略为 no（仅读取，没有修改）。两次检查中 Docker/Core 身份、Core 启动时间、挂载和根元数据相同。授权前后 38 个组件文件与桥接配置条目完全一致，b5 包原 SHA256 不变。原机没有停机测试、冷备、SDK KV 读取或部署。详见[本次原机记录](../../experiments/openharmony_bridge/evidence/production-host-authorized-preflight.json)，前文独立验收记录保留授权前时点的事实。
 
-下一步顺序：在独立环境解决 HA OS 宿主离线运行时依赖 → 另行安排维护窗口生成真实冷备 → 审阅旧绑定和实体问题 → 原身份离线转换、正式父 SN 及原生目录验证 → 才能安排单网关安装、启用与回退。此次没有生成生产冷备，也没有更新原 HA。
+宿主免安装运行时已在独立环境准备，见[便携冷备运行时](../portable-cold-runtime.md)：随包带固定哈希的 Python 和依赖，原机不必安装 Python；已在官方 HA OS 18.3 用户空间验证，但尚未传入或运行于原机。下一步顺序：刷新只读清单并保留旧绑定歧义 → 另行安排维护窗口生成真实冷备 → 审阅冻结旧绑定和实体问题 → 原身份离线转换、正式父 SN 及原生目录验证 → 才能安排单网关安装、启用与回退。此次没有生成生产冷备，也没有更新原 HA。
 
 本轮按 TypeSafe 技能由 Jev 对“宿主 SSH / Core 文件入口”和“配置重放 / 实际绑定证据”分类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-maintenance-routing.json)；授权后又对[单条公钥追加操作](../../experiments/openharmony_bridge/evidence/jev-host-key-append-routing.json)归类。复杂判断、身份、用户授权和通过条件由 Codex 与确定性代码负责。工具运行不依赖 AI。
