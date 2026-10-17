@@ -204,20 +204,24 @@ def identity_proof(config, mac, report):
         raise ValueError('legacy SDK version has not passed identity format validation')
     base = config / RUNTIME / 'config'
     ac, sn = read_file(base / 'device_ac')[0], read_file(base / 'device_sn')[0]
-    if len(sn) < 2 or sn[-1:] != b'\0' or b'\0' in sn[:-1] or not re.fullmatch(rb'[A-Za-z0-9_-]{1,39}', sn[:-1]):
+    if len(sn) < 2 or sn[-1:] not in (b'\0', b'\n') or not re.fullmatch(rb'[A-Za-z0-9_-]{1,39}', sn[:-1]):
         raise ValueError('invalid original native SN')
     identity = codec.decode(read_file(base / 'config.cfg')[0], read_file(base / 'bridge.cfg')[0], ac, mac)
     excluded = base / 'excluded_devices.txt'
     excluded_present = bool(read_file(excluded)[0].strip()) if excluded.exists() else False
     rows = report['legacy_inventory']
     matched = len(rows) == len(identity['children']) and {r['sn'] for r in rows} == {r['sn'] for r in identity['children']}
-    return {'root_id_sha256':codec.digest(identity['dev_id'].encode()),
+    proof = {'root_id_sha256':codec.digest(identity['dev_id'].encode()),
         'native_sn_sha256':codec.digest(sn), 'AC_sha256':codec.digest(ac),
         'account_field_sha256':{name:codec.digest(identity[name] if isinstance(identity[name],bytes) else identity[name].encode())
             for name in ('secret','psk','uid_hash','auth_id','auth_code')},
         'children':[{'sn_sha256':codec.digest(row['sn'].encode()), 'id_sha256':codec.digest(row['dev_id'].encode())}
                     for row in identity['children']], 'legacy_sdk_sha256':codec.SDK_SHA256,
         'child_inventory_matches_live':matched, 'excluded_devices_present':excluded_present}
+    if sn.endswith(b'\n'):
+        # 原始字节及摘要照存；不把LF文件当成已确认的原生C字符串。
+        proof['native_sn_storage_format'] = 'ascii-line-LF; native canonicalization pending'
+    return proof
 
 
 @contextmanager

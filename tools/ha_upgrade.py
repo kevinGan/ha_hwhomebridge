@@ -1,6 +1,6 @@
 """离线升级工具：默认预检，只支持已有 HiLink 组件的保留式升级。
 
-在目标 Linux 的文件通道中运行；Podman 检查是本地停机证据，不是跨主机身份锁。
+在目标 Linux 的文件通道中运行；本机容器检查是停机证据，不是跨主机身份锁。
 不迁移 SDK KV，不调用 HA 服务，不启动/停止 HA 或桥接。
 """
 import argparse
@@ -19,9 +19,10 @@ import zipfile
 
 COMPONENT = Path("custom_components/hwhomebridge")
 PRESERVE = ("config/", "hilink_bridge/", "profile/")
-VERSION = "1.1.0b5"
+VERSION = "1.1.0b6"
 TESTED_HA = "2026.10.1"
 MAX_BYTES = 128 * 1024 * 1024
+CONTAINER_ENGINE = "podman"
 
 
 def digest(data):
@@ -190,9 +191,19 @@ def load_package(path, expected):
 
 
 def podman(*args):
-    result = subprocess.run(["podman", *args], capture_output=True, text=True)
+    # 保留函数名供既有离线调用方使用；显式选择本机引擎，不继承远程context。
+    if CONTAINER_ENGINE == "docker":
+        prefix = ["docker", "--host", "unix:///var/run/docker.sock"]
+    elif CONTAINER_ENGINE == "podman":
+        prefix = ["podman", "--remote=false"]
+    else:
+        raise ValueError("explicit local Docker/Podman engine required")
+    environment = dict(os.environ)
+    for name in ("DOCKER_CONTEXT", "DOCKER_HOST", "CONTAINER_HOST", "CONTAINER_CONNECTION"):
+        environment.pop(name, None)
+    result = subprocess.run([*prefix, *args], env=environment, capture_output=True, text=True, timeout=180)
     if result.returncode:
-        raise ValueError("local Podman operation failed; inspect private diagnostics on target")
+        raise ValueError("local container operation failed; inspect private diagnostics on target")
     return result.stdout
 
 
@@ -235,6 +246,21 @@ def target_paths(config):
     return config, component, entries
 
 
+def runtime_probe_result(raw):
+    marked = [line[len('HA_RUNTIME_PREFLIGHT '):] for line in raw.splitlines()
+              if line.startswith('HA_RUNTIME_PREFLIGHT ')]
+    if len(marked) > 1:
+        raise ValueError('ambiguous target runtime probe output')
+    # 兼容早期完整JSON响应；有启动器额外输出时只接受唯一的明确标记。
+    try:
+        result = json.loads(marked[0] if marked else raw)
+    except (ValueError, TypeError) as error:
+        raise ValueError('target runtime probe did not return a valid result') from error
+    if not isinstance(result, dict):
+        raise ValueError('target runtime probe must return an object')
+    return result
+
+
 def integration_entries(storage):
     return [entry for entry in storage["data"]["entries"] if entry["domain"] == "hwhomebridge"]
 
@@ -262,7 +288,7 @@ def preflight(config, package, sha256, container, probe):
                  "--security-opt", "no-new-privileges", "--user", info["Config"].get("User") or "0",
                  "-v", str(config) + ":/config:ro", "-v", str(probe.resolve()) + ":/probe.py:ro",
                  "--entrypoint", "python3", info["Image"], "-B", "/probe.py", "--offline")
-    runtime = json.loads(raw)
+    runtime = runtime_probe_result(raw)
     if runtime["ha_version"] != manifest["tested_ha"] or runtime["architecture"] != arch or not runtime["owned_readable_config"]:
         raise ValueError("HA version, runtime architecture or runtime UID/permissions mismatch")
     return {"passed": True, "scope": "offline file installation only", "release": manifest["version"],
@@ -399,6 +425,7 @@ def restore(config, directory, container, restore_entries=False):
 
 
 def main():
+    global CONTAINER_ENGINE
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", nargs="?", default="preflight", choices=("build", "preflight", "backup", "install", "restore"))
@@ -406,6 +433,7 @@ def main():
     parser.add_argument("--package", type=Path)
     parser.add_argument("--sha256")
     parser.add_argument("--container")
+    parser.add_argument("--engine", choices=("podman", "docker"), default="podman")
     parser.add_argument("--backup", type=Path)
     parser.add_argument("--restore-entries", action="store_true")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
@@ -414,6 +442,7 @@ def main():
     parser.add_argument("--native-aarch64", type=Path)
     parser.add_argument("--probe", type=Path, default=Path(__file__).with_name("ha_runtime_preflight.py"))
     args = parser.parse_args()
+    CONTAINER_ENGINE = args.engine
     try:
         if args.action == "build":
             if not args.output or not args.native_x86_64 or not args.native_aarch64:

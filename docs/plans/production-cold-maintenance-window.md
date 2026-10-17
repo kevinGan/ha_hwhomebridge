@@ -1,127 +1,103 @@
-# 生产冷备维护窗口：执行、撤销与恢复
+# 原 HA 冷备、保留式安装与恢复记录
 
-2026-10-17。当前只完成只读准备和独立演练；**没有获批或执行原机停机、冷备、传包、部署、后端切换**。下面是未来窗口的人工运行手册，不是可直接执行的自动化。窗口只保存原网关快照，结束后仍运行原代码、原配置条目和原网关，不启用 OpenHarmony，不创建第二个网关。
+2026-10-18 更新。用户已指定原 HA，并明确接受短暂停 Core、Node-RED、File editor 和 Supervisor，要求先验证恢复方案再部署。本轮已完成生产冷备、安装 `1.1.0b6`、恢复服务和智慧生活旧灯控制验证。仍沿用原配置条目、原网关和旧 SDK，**尚未切换到 OpenHarmony，尚未在原网关启用新风扇能力**。
 
-## 本次只读复核
+脱敏结果见 [生产安装验收记录](../../experiments/openharmony_bridge/evidence/production-b6-deployment.json)。之前的[只读准备记录](../../experiments/openharmony_bridge/evidence/production-cold-window.json)是历史证据，其中“未部署”仅描述当时状态。
 
-原机 HA OS 18.3 / Core 2026.10.1 / Supervisor 2026.09.3，amd64；宿主 Docker 29.7.2，Core 使用 host 网络、运行 UID 0，重启策略为 `no`。独立宿主 SSH 已可用；宿主没有 Python，故使用已独立验证的[免安装运行时](../portable-cold-runtime.md)。这些是准备时观察，窗口前必须重查，不能永久沿用。
+## 实际结果
 
-新清单仍识别 32 个旧设备，书房 13 个显式角色和 7 张组合卡的只读状态投影通过。接管阻塞仍有两项：书房旧灯服务选取随实体顺序改变；厨房灯组一个实体不可用。它们不妨碍保存原样冷备，但**阻止把冷备当成可接管配置**。
+- 原机 HA OS 18.3 / Core 2026.10.1 / Supervisor 2026.09.3，amd64，Docker 29.7.2。Core 使用 host 网络、UID 0。独立宿主 SSH 已固定公钥；没有带外核对记录，不声称已带外验证。
+- 安装前完整冷备包含原组件、桥接运行目录和三份 HA 注册表。原机和本机私有副本均验真通过，解码的 32 个旧子设备与在线清单一致；在全新维护目录原样还原通过，未覆盖原 HA、未启动副本。
+- 原 Core 容器 ID 和全部四个服务的镜像保留。Node-RED 被 Supervisor 自动重建，容器 ID 有变化，镜像相同；不能把“所有插件 ID 都不变”当成恢复条件。
+- Core、Node-RED、File editor、Supervisor 均已恢复；`watchdog=true`、`boot=true`，临时 systemd runtime drop-in 已移除，原单元定义恢复。
+- `1.1.0b6` 在原 HA 实际加载，原条目状态 `loaded`；旧 SDK 在线回调为真，当前路由仍有原来的 32 个设备和原品类。
+- 22 个受保护静态文件逐一核对未变：原产品/适配器配置、SDK 和 profile。原条目 ID、unique ID、options 和原 data 字段保留；初始化只补入 `backend_type=legacy`，同时 HA 更新 `modified_at`。不是配置条目逐字节不变。
+- HA 真实前端可见版本、32 个设备、原条目和当前运行/保存选择 `legacy`。查看后退出，没有提交后端或设备管理修改。
+- MatePad 智慧生活中核对目标旧灯的序列号与原清单一致；实际操作开关、亮度和色温，HA 主灯分别读回变化。亮度恢复 100%，色温通过 HA 精确恢复 4000 K，最后从 App 关灯，回到测试前关闭状态。氛围灯、风扇的状态和更新时间在测试期间不变。
+- 没有新建生产网关、重新配对、解绑、修改米家或 Node-RED 自动化定义。实际灯具发光效果没有额外的人工目视确认，验收依据是 App 和 HA 读回。
 
-书房旧 Huawei 设备只有一个 PID `002`，服务为 `switch`、`brightness`、`cct`。观察顺序重放三项均选主灯，氛围灯也是候选。当前部署版本没有运行时映射查询接口，新读取的已有 Core 日志也没有目标路由。因此实际旧绑定继续标记“未确认”；不宣称氛围灯已有独立旧卡，不在原机冻结或覆盖绑定。
+## 停机前必须核对的现场条件
 
-私有复核包包括：两次静态组件及所属配置条目观察、两次宿主 Docker 证据、双遍实体清单、已有日志审计、显式角色文件及映射配置。它们保留本机私有目录；Git 中只保存计数、布尔结果和脱敏演练。`tools/ha_maintenance_review.py` 在本机离线比较这些观察，文件、条目、Core 启动记录、宿主身份或实体预检配置不一致时返回失败；无网络或控制入口，也不签发部署许可。
+配置目录同时被 Core、Node-RED、File editor 和 Supervisor 可写挂载持有。仅停止 Core 不满足冷备排他条件；不得忽略共享所有者来放行。宿主没有 Python，使用私有维护目录中的[免安装运行时](../portable-cold-runtime.md)，不向系统安装依赖，也不使用 Core 容器代替宿主维护通道。
 
-```sh
-# 完全离线，仅读取已有私有观察。失败时不可用这份清单放行后续流程。
-python3 tools/ha_maintenance_review.py \
-  --before /secure/online-before --after /secure/online-after \
-  --host-before /secure/host-before --host-after /secure/host-after \
-  --preflight /secure/entities/preflight.private.json \
-  --binding /secure/binding/binding-audit.private.json
-```
+宿主实际单元 `haos-supervisor.service` 为 `Restart=always`，其厂商定制 `/usr/sbin/haos-supervisor` 含镜像检查、删除和重新拉取分支。维护恢复不能直接运行这个启动入口，以免顺带更新镜像。
 
-## 窗口前需要落实
+每次新窗口均重新确认：原条目与配置、实际 `/config` 挂载、Core 容器 ID/镜像、四个共享所有者、接口 MAC、watchdog/boot 原值、没有在途升级或恢复任务、SSH 可用及维护盘空间。不要猜 HA OS 配置路径，不开放 Docker TCP，不临时撤换宿主密钥。导出工具只能检查当前引擎和可见同 UID 宿主进程，不能代替其他机器和外部任务的排他确认。
 
-1. 单独取得**原机冷备窗口**授权，明确短暂停用 HA、临时调整并恢复 Core watchdog，以及窗口内只读原始配对资料。当前授权仅涵盖只读准备。建议预留 30 分钟，另留恢复时间；这不是已预约的时间或停机时长承诺。
-2. 安排一名操作员持有宿主 SSH，另确认本地 HA OS 控制台可达。原 SSH 固定宿主公钥严格匹配；没有带外核对的既有记录不能标成带外验证。禁止为故障临时开放 Docker TCP 或撤换原公钥。
-3. 刷新当前静态副本、双遍实体预检、已有日志与宿主预检。记录原条目 ID、原容器 ID/镜像/配置实际挂载、UID/GID/普通权限、实际接口 MAC、watchdog 和 boot 原值；敏感数据只进私有工单。若源条目、SDK 版本或配置已变，先重做预检，不套用本次清单。
-4. 当前原机 `watchdog=true`、`boot=true`，但需要在窗口前重新读取。确认没有升级、迁移、恢复或启停任务在进行；明确取消窗口期间的外部拉起和运维任务。Docker `restart=no` 不能阻止 Supervisor 或其他所有者拉起。检查两个引擎、其他主机和外部任务；导出器只检查当前引擎及可见同 UID 宿主进程，不能承担分布式排他锁。
-5. 在 HA 配置目录之外选 root 控制的持久维护目录，不用 `/tmp`、组件目录或 `.storage`。不猜 HA OS 配置路径，以 Docker 实际 `/config` 挂载为准。预留不少于 2 GiB 并确认实际目标文件系统空间：工具源大小上限 256 MiB，还需运行时、导出、私有传输副本和全新还原目录的空间。独立工作站也要有私有存储；完整配置条目含其他集成凭据。
-6. 准备最终压缩包与可信外部 SHA256、预检文件、工单、恢复命令和原 watchdog 值。先做包哈希与运行时自检，成功后才允许停 Core。遇到版本、架构、完整性、权限、宿主密钥或路径不符，在在线阶段退出。
+维护目录须由 root 控制、权限 0700，位于配置目录之外；完整注册表含其他集成凭据，不能进入 Git、聊天或普通共享目录。预留至少 2 GiB 和独立私有副本位置。本次冷备仅覆盖桥接子系统及相关注册表，不是整机或 HA 数据库备份。
 
-固定包：`hwhomebridge-cold-runtime-linux-x86_64.tar.gz`，SHA256：
+## 已验证的执行和恢复顺序
 
-```text
-fe5732626b7e04e139c8484f863ac7529d310ad8744519818d665ca9c081c5f1
-```
+以下是现场核对后的操作顺序，不是可直接整段粘贴的无人值守脚本。每步记录返回码和实际状态，异常时先恢复原运行，再离线分析。
 
-本轮没有向原机传入这个包。将来传包、解压、自检会写维护目录，也应纳入该次窗口授权。只把需要的稳定 `preflight.private.json` 传入维护目录，不把 HA token、SSH 私钥放到原机，也不用 Core 容器 Python 代替宿主环境。
+1. 记录原 `systemctl cat haos-supervisor.service`、四个容器的身份/镜像/状态、`ha core info --raw-json` 中 watchdog 和 boot。
+2. 确认专用 runtime drop-in 不存在。在 `/run/systemd/system/haos-supervisor.service.d/` 新建仅本次维护使用的文件，权限 0600，清空 ExecStart 后只启动现有 Supervisor 容器并等待它退出：
 
-## 人工执行顺序
+   ```ini
+   [Service]
+   ExecStart=
+   ExecStart=/bin/sh -c "/usr/bin/docker --host unix:///var/run/docker.sock start hassio_supervisor >/dev/null && exec /usr/bin/docker --host unix:///var/run/docker.sock wait hassio_supervisor"
+   ```
 
-以下命令仅供未来批准的窗口使用，不能把整段当脚本粘贴。每步检查返回码及实际状态；发生不符立即进入下表。所有命令输出、原始 JSON 和路径保持私有。`HA_CONFIG`、`MAINT`、`COLD` 是操作员按现场证据填写的绝对路径；输出必须全新、位于源配置之外。结束前不清理任何恢复所需材料。
+   `daemon-reload` 后核对有效 ExecStart，必须没有厂商启动脚本。不能使用未通过演练的 `docker start --attach` 替代这一路径。
+3. 设置 `ha core options --watchdog=false` 并读回。通过 `ha core stop` 正常停止 Core，不加 force；再停止 Supervisor 管理单元，最后停止 Node-RED 和 File editor，以免被其监督器拉起。
+4. 至少观察 60 秒，四个原容器均无 Running/Paused/Restarting/Pid，身份与镜像稳定。导出前后还须由冷备工具检查所有权、可写挂载、宿主进程和原文件一致性。
+5. 从可信运行时导出并验真；仅成功导出才作为有效快照：
 
-### A. 在线准备，尚不停机
+   ```sh
+   ./cold-backup export --engine docker --container homeassistant \
+     --config "$HA_CONFIG" --interface enp2s1 \
+     --preflight "$MAINT/preflight.private.json" --output "$COLD"
+   ./cold-backup verify --output "$COLD"
+   ```
 
-在独立宿主 SSH 中记录 `ha core info --raw-json`、`ha core options --help` 和指定容器的定向 `docker inspect` 结果。CLI 帮助已经只读实查支持下述选项；现场若有版本变化，重新核对。不要记录容器全部环境变量或把含凭据的输出粘贴到聊天。
+6. 若本窗口安装组件，先用 `ha_upgrade.py backup` 保存组件和原条目，再 `preflight`、`install`。显式传 `--engine docker`、包 SHA256 和当前标记式探针。安装器保留 `config/`、`hilink_bridge/`、`profile/` 及运行 KV，不自动启用 OpenHarmony。
+7. 无论导出/安装是否成功，源和原容器完整时，用上述临时单元启动已有 Supervisor，等待其 API 就绪。再次确认 Core 原 ID/镜像仍在，再 `ha core start`。恢复两个插件；允许 Supervisor 以原镜像重建插件，但必须核对对应服务正常运行，不运行更新/重装命令。
+8. 读回四个服务状态，恢复记录的 watchdog 原值，确认 boot 未变。移除**本次创建的** runtime drop-in，`daemon-reload`，核对单元定义与原记录完全相同。失败收尾须分别尝试恢复 watchdog，不能因前面的插件容器 ID 断言失败而跳过。
+9. 在线核对 API、原条目、实际路由和旧 SDK 在线回调；随后做 App 控制验收。导出副本私有传输到工作站并重新验真，离线还原只写全新目录：
 
-在 root 私有维护目录中确认压缩包来源和外部哈希，再解压、运行 `./cold-backup self-test`。包自检通过不等于停机条件通过，也不读取生产配对 KV。另存当前在线源配置 JSON 的哈希及预检文件哈希；供停机导出检查前后一致性。
+   ```sh
+   ./cold-backup restore --output "$COPIED_COLD" --target "$NEW_RESTORE"
+   ```
 
-### B. 停止原所有者并确认排他
+   不启动还原目录，不在线覆盖全量注册表。原始还原核对字节、UID/GID、普通权限、mtime 和空目录，不等于原机回滚安装已执行。
 
-由操作员记录恢复检查单，保持 boot 原值、不升级、不重启 Supervisor 或宿主。使用 Supervisor 支持的 Core 管理入口：
+Core stop/watchdog 语义已按实际版本的 [Supervisor API](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/api/homeassistant.py)及 [Core 实现](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/homeassistant/core.py)核对，CLI 选项在原机读 help 确认；定制单元另外做了实际现场演练和恢复，不能仅引用官方源码就视为通过。
 
-```sh
-ha core options --watchdog=false
-ha core info --raw-json
-# 确认watchdog确实为false、无在途启停/升级任务后，再执行下一步。
-ha core stop
-```
+## 本轮发现与修复
 
-不使用 `--force` 绕过离线数据库迁移；不以 `docker stop` 代替监督器管理，不停止 Supervisor。按 [Supervisor 2026.09.3 的 Core 接口](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/api/homeassistant.py)，stop 调用原 Core 的 stop；[Core 实现](https://github.com/home-assistant/supervisor/blob/2026.09.3/supervisor/homeassistant/core.py)默认保留容器，watchdog 会处理失败/不健康事件。临时关闭 watchdog 是本方案的额外排他措施，**不是声称单独 `ha core stop` 在任何情况下都会自动重启**。
+首次生产导出因在线/存储注册表表示不同而拒绝，没有安装代码。在线阶段补齐元数据后才重做：新版设备存储用单一 `config_entry_id`，WebSocket 用兼容列表；实体列表接口省略类别字段，改对已选设备逐项只读获取完整元数据。仍严格比较归属、类别和原文件，不把缺失字段当作 None。复合设备归属不明时拒绝自动投影。
 
-在至少 60 秒观察期间，通过宿主通道重复读取同一个容器：ID、配置挂载和镜像不变，Running/Paused/Restarting 都为 false，Pid=0，restart 为 no，StartedAt/FinishedAt 连续稳定；再次确认 watchdog=false、SSH 可用、无其他共享可写所有者。60 秒只是操作观察，导出前后仍须由导出器完整复查，不能替代外部任务排他确认。若 Core 自行恢复或记录变化，停止流程，不反复抢停。
+原机 SN 文件以单个 LF 结尾，实验资料为 NUL。导出器现在只接受有界安全 ASCII 加其中一个终止字节，原始字节与哈希照存；LF 格式明确标记“原生解释待确认”。**没有修改源 SN，也没有放宽接管合同。**
 
-原部署代码的普通卸载只清空回调；**永久删除条目**会删除云端子设备、调用 `exit_brg` 并清理持久化目录。窗口不得删除/重建条目，不在智慧生活解绑，不调用 `stop_hw_hilink_bridge` 或 `exit_brg`，也不通过集成重载来“测试停机”。本轮未验证原机停机行为；最终以实际窗口证据为准。
+Docker 启动探针前实际输出 `docker-default`，原先整段 JSON 解析失败。探针改用唯一 `HA_RUNTIME_PREFLIGHT ` 标记；重复标记、非对象或无有效 JSON 拒绝。原机实际 HA 镜像的只读、无网络探针已通过。
 
-### C. 导出、验真，再恢复原运行
+首次失败后的恢复中，Supervisor 自动重建 Node-RED，旧的“全部容器 ID 不变”断言中断了部分收尾；随后已恢复 watchdog、移除 drop-in 并核对所有服务。修订后的第二次冷备及第三次安装均完整收尾，不重复套用旧断言。
 
-```sh
-# 在已自检的运行时目录中执行；三项路径已人工核对。
-./cold-backup export --engine docker --container homeassistant \
-  --config "$HA_CONFIG" --interface enp2s1 \
-  --preflight "$MAINT/preflight.private.json" --output "$COLD"
-./cold-backup verify --output "$COLD"
-```
+## 固定产物与验证边界
 
-检查退出码和 JSON 的 `passed`。导出包含完整组件、旧运行目录和三份注册表；离线验证 SDK 字节、原 MAC 对应的身份解码及全部子身份。实体歧义或云端子清单差异不能隐去；`adoption_ready` 继续为 false。若解码未知格式或配对资料不符，保存私有错误记录，**不尝试在线修复、重配或重建身份**。
+| 产物 | SHA256 |
+| --- | --- |
+| 本次生产冷备运行时 v2 | `008306121271c7dae91aa2c932f859df6441577ee42af03bab3ebf1d0fa2a672` |
+| 本次安装包 `hwhomebridge-1.1.0b6.zip` | `0de843ba3d3247379b26be0eb184cdb58524f10ebe8e61e52ad0c3b95257bd71` |
 
-无论备份是否成功，只要源未变、原容器保留、没有其他身份所有者，按恢复检查单启动**原容器对应的 Core**：
+之前准备的运行时 `fe5732626b7e04e139c8484f863ac7529d310ad8744519818d665ca9c081c5f1` 是旧产物，不能与本次 v2 混用。新运行时覆盖上述注册表与 LF 冷备修复；本次安装器另用当前 B6 源码。B6 包有 49 个公共文件和 6 个双架构原生产物，原生代码未改，逐个核对已验证 B5 产物和其源码哈希后复用。包不带厂商 SDK、profile 或凭据。
 
-```sh
-ha core start
-```
+本机公共测试 64 项、工具测试 106 项、配置校验通过。独立 ARM Linux 上公共 64 项、升级工具 23 项、冷备/预检 33 项通过。四个合成 sleep 所有者演练覆盖仅停 Core 拒绝、全部停止后导出/验真、恢复原容器；同源宿主 Python 完成，最初 x86 模拟器中的便携入口超时不算通过。
 
-启动前再次确认原 ID/镜像/配置挂载，防止 `start` 在原容器缺失时新建实例。等待原 HA API、原条目状态、原桥接日志恢复；只观察智慧生活已有网关/旧灯是否在线，不新发现、不配对、不发设备控制。原容器 ID 应相同、StartedAt 应更新；这与本轮全程在线时要求启动时间不变是两个不同阶段。
+为验证定制恢复机制，另在原 HA OS 上运行了无网络、无 HA 数据挂载的 sleep 容器和独立测试单元，验证原容器恢复、跳过厂商脚本、移除临时单元后恢复定义并清理；不是独立虚拟机，也不是那时就已验证真实 Supervisor 生命周期。后续生产窗口才完成真实 Supervisor/Core 停止与恢复。
 
-随后**恢复已记录的 watchdog 原值**，再读回确认。例如原值 true 才执行 `ha core options --watchdog=true`；原值 false 就保留 false。boot 始终不改。若启动失败，保留独立宿主通道和原目录，不连续重启试错；明确记录尚未恢复的 watchdog 状态，按故障表处理。
+Jev 用于验收证据分类，区分后端回调与真实前端验收；没有决定授权、网关身份或测试通过。具体执行和验收由 Codex 与确定性检查负责。
 
-### D. 缩短停机后的离线工作
+## 回退和后续接管
 
-原 Core 恢复后，再通过已固定公钥的 SSH 私有传输冷备到独立 Linux 管理员环境。原始导出和本地副本都保持私有权限，在副本上重新验真，再还原到全新包装目录：
+若 B6 加载失败：通过原独立维护通道停止已确认的写入者，从本次组件备份执行 `ha_upgrade.py restore --engine docker ... --restore-entries`，核对后恢复原服务。只恢复所属条目，保留其他集成最新记录和当前 SDK KV；不把全量冷备注册表直接覆盖到在线原 HA。本轮安装正常，因此没有在原机实际执行这一回滚。
 
-```sh
-./cold-backup verify --output "$COPIED_COLD"
-./cold-backup restore --output "$COPIED_COLD" --target "$NEW_RESTORE"
-```
+任何失败都不删除条目、不在智慧生活解绑、不调用 `exit_brg`，也不启动第二个相同身份的引擎。原容器或源丢失时不要调用可能新建容器的普通 start；保留现场，先在新目录验真恢复，再逐项处理。
 
-`NEW_RESTORE/config/` 仅用于离线对照原字节、UID/GID、普通权限、mtime 和空目录。禁止启动这份配置或 SDK，禁止把它覆盖到正在运行的原 HA，禁止借此增加新网关。维护窗口无需为了离线还原长期停止原 Core。导出/还原是桥接子系统备份，不是完整 HA、数据库或 HA OS 整机备份。
+OpenHarmony 唯一引擎仍有明确未完成项：
 
-## 故障、撤销和恢复
-
-| 触发点 | 处理 | 如何恢复原运行 |
-| --- | --- | --- |
-| 哈希、自检、独立通道、空间、预检或排他条件不通过，尚未停 Core | 取消本次窗口，不放宽保护条件 | 若已临时改 watchdog，恢复记录原值；HA 继续运行 |
-| watchdog 设置失败或读回不符 | 不执行 stop；保留私有错误证据 | 读回、恢复原值；无法恢复时明确交接，不宣称完成 |
-| stop 被迁移/并发任务拒绝 | 不加 force，不发额外 stop | 确认 Core 实际状态；若仍在线，恢复 watchdog 后退出 |
-| stop 返回失败/超时或 SSH 中断，Core 状态不明 | 不根据返回码猜停机成功；用独立 SSH/宿主本地控制台重新核对同一个容器 | 已在线则核对健康；已停止且源完整则恢复原 Core；通道未恢复前不部署、不重建容器 |
-| Core 被自动拉起或出现第二个所有者 | 停止导出，不反复抢停，处理未排除的拉起来源 | 若原 Core 已运行，只读核对；源完整、排他重新成立才可恢复设置，否则人工交接 |
-| 导出因陈旧清单、格式、占用或一致性失败 | 不发布有效快照，不改源文件/身份，不覆盖输出；问题待在线重新预检 | 先确认源完整、原容器仍在且无其他所有者，再 start 原 Core，恢复 watchdog 原值 |
-| 验真/离线还原失败、传输副本损坏 | 不使用失败副本、不写回原配置；保存诊断，重新私有传输或重开窗口 | 源完整时按原 Core 恢复流程；成功还原的新目录也不能自动激活 |
-| 原容器消失、源被意外修改或身份资料损坏 | 停止普通恢复流程，保留现场，不调用可能新建容器的 start，不盲目覆盖整个 `core.config_entries` | 单独制定故障恢复窗口；在新目录验真还原，逐项审阅再决定写回，避免回滚其他集成的新状态 |
-| start 失败或恢复后桥接报错 | 保存宿主/Core 日志、容器和源证据，不解绑或重加集成 | 使用独立通道排查；watchdog 未恢复的状态必须显式交接，不反复启动第二个引擎 |
-
-本次冷备窗口没有安装新代码或切换后端，所以正常“回退”就是**恢复原 Core 和原 watchdog 设置**，不需要覆盖配置。未来真正部署/接管的回退需要独立计划，不能把全新目录原始还原冒充已经验收的原机回滚安装器。
-
-## 完成条件与本轮演练边界
-
-未来窗口完成须同时满足：有效冷备在两个私有位置验真；独立新目录原始还原及身份/子清单对照完成；原 Core、原配置条目和旧网关恢复在线；静态代码和所属配置条目未改；watchdog 恢复原值且 boot 未改；没有第二个所有者、解绑、灯光控制或自动化改动。HA 状态值可能因家庭使用或米家自动化自然变化，不把“所有状态完全相同”当成要求。
-
-本轮独立演练使用官方 HA OS 18.3 用户空间、Ubuntu systemd 宿主、真实 Docker、合成旧身份和只运行 sleep 的所有者。覆盖成功冷备后恢复同一容器、恢复运行时在全新目录离线还原，以及陈旧预检导致导出失败后恢复同一容器。原字节和源元数据保持不变；冷备既有的运行中、自动重启、共享写入、文件占用及篡改拒绝也一并复跑。
-
-这**没有运行真实 Supervisor stop/start，也没有启动 HA/SDK 或完整 HA OS**；不能代替生产停机、原身份云端在线或灯卡验收。Supervisor 路由和 watchdog 语义通过已安装版本的官方源码核对，CLI 能力通过原机只读 help 核对。脱敏结果见[窗口准备与演练记录](../../experiments/openharmony_bridge/evidence/production-cold-window.json)。Jev 仅把配置重放和无路由日志分为证据类型，未判定实际绑定、授权或通过；执行顺序、身份与失败收尾由 Codex 和实际测试核对。
-
-本机工具回归 93 项和配置校验通过；新增离线复核的 7 项也在独立 Linux 通过。演练所用脚本、复核工具和测试文件与最终源码哈希一致，包仍为以上固定 SHA256；测试容器及临时挂载清理完毕。Jev 的输入和分类结果见[脱敏记录](../../experiments/openharmony_bridge/evidence/jev-cold-window-evidence.json)，不包含设备 ID、实体名、凭据或配对资料。
-
-窗口之后仍需：审阅旧绑定冻结方案与不可用实体处理 → 原身份离线转换 → 正式父 SN/原生目录验收 → 独立环境完整接管/回退 → 再批准原机唯一网关的部署。此手册不提前放行这些阶段。
+1. 以本次已配对生产冷备验证 LF 文件到原生 SN 的确切解释，补齐离线导入、正式父 SN 和回退合同；不能直接改用实验身份。
+2. 以 B6 运行时诊断冻结 32 个旧设备的实际绑定。书房三项旧灯服务已确认对应主灯；顺序重放仍有氛围灯候选，不能拿自动重放代替当前绑定。厨房不可用灯组保持原样，不能偷偷移除或回报成关闭。
+3. 在独立环境验证正式身份格式和真实目录转换，核对旧子 SN/云 ID 保留、新组合卡目录以及失败回退。含生产身份的副本只能做无网络离线校验，不能与生产同时上线。
+4. 条件补齐后，在原条目显式切换唯一引擎，再验收新风扇六档、自然风、正反转、定时及完整灯光、重启恢复和原 SDK 回退。本次 B6 旧 SDK 安装和旧灯验收不能替代这一阶段。

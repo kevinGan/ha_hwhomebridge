@@ -12,7 +12,8 @@ import types
 from ha_production_readonly import SupervisorReader, private_write
 
 READ_COMMANDS = {'get_config', 'get_states', 'get_services',
-                 'config/device_registry/list', 'config/entity_registry/list', 'config_entries/get'}
+                 'config/device_registry/list', 'config/entity_registry/list',
+                 'config/entity_registry/get', 'config_entries/get'}
 DEVICE_FIELDS = ('id', 'name', 'name_by_user', 'model', 'manufacturer', 'disabled_by', 'config_entries', 'identifiers')
 ENTITY_FIELDS = ('entity_id', 'device_id', 'platform', 'unique_id', 'disabled_by', 'hidden_by',
                  'device_class', 'original_device_class', 'name', 'original_name')
@@ -37,7 +38,18 @@ def core_module(name):
 
 
 def project(rows, fields, key, *, sort_rows=True):
-    result = [{name: row.get(name) for name in fields} for row in rows]
+    result = []
+    for row in rows:
+        value = {name: row.get(name) for name in fields}
+        if 'config_entries' in fields and 'config_entries' not in row and 'config_entry_id' in row:
+            # HA 3.4设备存储为单一归属；WebSocket仍提供兼容列表。
+            if row.get('composite_device_id') or row.get('has_composite_identifiers'):
+                raise ValueError('composite storage ownership needs an explicit projection')
+            owner = row['config_entry_id']
+            if owner is not None and not isinstance(owner, str):
+                raise ValueError('invalid singular configuration entry owner')
+            value['config_entries'] = [owner] if owner is not None else []
+        result.append(value)
     for row in result:
         for name in ('config_entries', 'identifiers'):
             if name in row and row[name] is not None:
@@ -61,7 +73,7 @@ def old_inventory(snapshot):
     devices = {row['id']: row for row in snapshot['devices']}
     bridges = {}
     for row in devices.values():
-        for identity in row.get('identifiers', []):
+        for identity in row.get('identifiers') or []:
             if identity and identity[0] == 'hwhomebridge' and len(identity) == 3 and identity[1] == entry['entry_id']:
                 sn = identity[2]
                 if sn in bridges or entry['entry_id'] not in row.get('config_entries', []):
@@ -218,11 +230,18 @@ async def assess(snapshot, component, instances=None, capability_config=None):
 
 
 class HAReader(SupervisorReader):
-    async def command(self, kind):
+    async def command(self, kind, *, entity_id=None):
         if kind not in READ_COMMANDS:
             raise ValueError('non-read-only HA command refused')
+        arguments = {}
+        if kind == 'config/entity_registry/get':
+            if not isinstance(entity_id, str) or '.' not in entity_id or any(c.isspace() for c in entity_id):
+                raise ValueError('explicit inventoried entity required')
+            arguments['entity_id'] = entity_id
+        elif entity_id is not None:
+            raise ValueError('unexpected arguments for read-only command')
         self.counter += 1
-        await self.ws.send(json.dumps({'id': self.counter, 'type': kind}))
+        await self.ws.send(json.dumps({'id': self.counter, 'type': kind, **arguments}))
         result = json.loads(await asyncio.wait_for(self.ws.recv(), 30))
         if result.get('id') != self.counter or not result.get('success'):
             raise ValueError('HA read-only command failed')
@@ -230,11 +249,11 @@ class HAReader(SupervisorReader):
         return result['result']
 
 
-async def capture(reader):
+async def capture(reader, extra_source_ids=()):
     config = await reader.command('get_config')
     entries = await reader.command('config_entries/get')
     services = await reader.command('get_services')
-    return {'ha_version': config['version'],
+    result = {'ha_version': config['version'],
         'entries': [{k:e.get(k) for k in ('entry_id', 'domain', 'state', 'disabled_by')} for e in entries if e['domain']=='hwhomebridge'],
         'devices': project(await reader.command('config/device_registry/list'), DEVICE_FIELDS, 'id'),
         'entities': project(await reader.command('config/entity_registry/list'), ENTITY_FIELDS, 'entity_id', sort_rows=False),
@@ -242,6 +261,20 @@ async def capture(reader):
                     'attributes':{k:v for k,v in s['attributes'].items() if k in ATTRIBUTES}}
                    for s in await reader.command('get_states')],
         'services': {domain:sorted(definitions) for domain, definitions in services.items()}}
+    _, sources = old_inventory(result)
+    selected = {source['id'] for source, _ in sources.values()} | set(extra_source_ids)
+    # 新版list是精简表示，不能把未返回的device_class当成持久化None。
+    for row in result['entities']:
+        if row.get('device_id') not in selected:
+            continue
+        detail = await reader.command('config/entity_registry/get', entity_id=row['entity_id'])
+        if detail.get('entity_id') != row['entity_id'] or detail.get('device_id') != row['device_id']:
+            raise ValueError('entity ownership changed during detail collection')
+        for field in ('device_class', 'original_device_class'):
+            if field not in detail:
+                raise ValueError('full entity class metadata missing')
+            row[field] = detail[field]
+    return result
 
 
 def public_summary(report):
@@ -256,8 +289,9 @@ async def collect(args):
     if args.output.exists() or args.output.resolve() != args.output.absolute():
         raise ValueError('new private output directory required')
     instances = json.loads(args.instances.read_text()) if args.instances else None
+    extra_sources = {row['id'] for row in instances['devices']} if instances else set()
     async with HAReader(args.url, args.token_file.read_text().strip()) as reader:
-        first, second = await capture(reader), await capture(reader)
+        first, second = await capture(reader, extra_sources), await capture(reader, extra_sources)
     report = await assess(second, args.component, instances, args.capability_config)
     if registry_proof(first['devices'], first['entities'], set(report['source_ids']), set(report['bridge_ids'])) != report['registry_proof']:
         raise ValueError('target registry changed during read-only inspection')

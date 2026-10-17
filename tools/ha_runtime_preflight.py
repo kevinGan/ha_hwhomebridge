@@ -54,4 +54,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--offline', action='store_true', required=True)
     parser.parse_args()
-    print(json.dumps(offline()))
+    print('HA_RUNTIME_PREFLIGHT ' + json.dumps(offline()))

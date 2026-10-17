@@ -177,5 +177,46 @@ class UpgradeFilesTest(unittest.TestCase):
                 upgrade.preflight(self.config, Path('package'), 'sha', 'test', Path('probe'))
 
 
+class LocalEngineTest(unittest.TestCase):
+    def test_probe_marker_separates_container_launcher_output(self):
+        value = {'ha_version': '2026.10.1', 'runtime_uid': 0}
+        raw = 'docker-default\nHA_RUNTIME_PREFLIGHT ' + json.dumps(value) + '\n'
+        self.assertEqual(upgrade.runtime_probe_result(raw), value)
+        self.assertEqual(upgrade.runtime_probe_result(json.dumps(value)), value)
+
+    def test_duplicate_probe_results_refused(self):
+        with self.assertRaises(ValueError):
+            upgrade.runtime_probe_result('HA_RUNTIME_PREFLIGHT {}\nHA_RUNTIME_PREFLIGHT {}')
+
+    def test_unmarked_noise_and_missing_or_nonobject_probe_refused(self):
+        for raw in ('', 'docker-default\n{}', 'HA_RUNTIME_PREFLIGHT []'):
+            with self.assertRaises(ValueError):
+                upgrade.runtime_probe_result(raw)
+
+    def test_explicit_Docker_socket_ignores_remote_context(self):
+        with patch.object(upgrade, 'CONTAINER_ENGINE', 'docker'), \
+             patch.dict(upgrade.os.environ, {'DOCKER_CONTEXT': 'remote', 'DOCKER_HOST': 'tcp://remote:2375'}), \
+             patch.object(upgrade.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            upgrade.podman('inspect', 'fixture')
+            self.assertEqual(run.call_args.args[0][:3], ['docker', '--host', 'unix:///var/run/docker.sock'])
+            self.assertNotIn('DOCKER_CONTEXT', run.call_args.kwargs['env'])
+            self.assertNotIn('DOCKER_HOST', run.call_args.kwargs['env'])
+
+    def test_Podman_remains_local(self):
+        with patch.object(upgrade, 'CONTAINER_ENGINE', 'podman'), \
+             patch.object(upgrade.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            upgrade.podman('ps', '-q')
+            self.assertEqual(run.call_args.args[0], ['podman', '--remote=false', 'ps', '-q'])
+
+    def test_unknown_engine_rejected_before_process_execution(self):
+        with patch.object(upgrade, 'CONTAINER_ENGINE', 'remote'), \
+             patch.object(upgrade.subprocess, 'run') as run:
+            with self.assertRaises(ValueError):
+                upgrade.podman('inspect', 'fixture')
+            run.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

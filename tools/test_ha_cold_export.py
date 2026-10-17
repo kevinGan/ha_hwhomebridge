@@ -54,6 +54,50 @@ def legacy_bytes(sn):
 
 
 class EntityPreflightTest(unittest.TestCase):
+    def test_singular_storage_owner_matches_live_compatibility_list(self):
+        old = snapshot()['devices']
+        stored = copy.deepcopy(old)
+        for row in stored:
+            row['config_entry_id'] = row.pop('config_entries')[0]
+        self.assertEqual(inventory.project(old, inventory.DEVICE_FIELDS, 'id'),
+                         inventory.project(stored, inventory.DEVICE_FIELDS, 'id'))
+        stored[0]['config_entry_id'] = 'different-owner'
+        self.assertNotEqual(inventory.project(old, inventory.DEVICE_FIELDS, 'id'),
+                            inventory.project(stored, inventory.DEVICE_FIELDS, 'id'))
+
+    def test_composite_storage_is_not_guessed_as_single_owner(self):
+        row = {'id': 'fixture', 'config_entry_id': 'owner', 'composite_device_id': 'composite'}
+        with self.assertRaises(ValueError):
+            inventory.project([row], inventory.DEVICE_FIELDS, 'id')
+
+    def test_partial_entity_list_fetches_full_classes_only_for_selected_sources(self):
+        data = snapshot()
+        class Reader:
+            def __init__(self): self.details = []
+            async def command(self, kind, *, entity_id=None):
+                if kind == 'get_config': return {'version': '2026.10.1'}
+                if kind == 'config_entries/get': return data['entries']
+                if kind == 'get_services': return {'light': {'turn_on': {}, 'turn_off': {}}}
+                if kind == 'config/device_registry/list': return data['devices']
+                if kind == 'config/entity_registry/list':
+                    return data['entities'] + [{'entity_id': 'sensor.unrelated', 'device_id': 'outside'}]
+                if kind == 'get_states': return data['states']
+                if kind == 'config/entity_registry/get':
+                    self.details.append(entity_id)
+                    return {**data['entities'][0], 'device_class': None, 'original_device_class': 'fixture-class'}
+                raise AssertionError('unexpected command')
+        reader = Reader()
+        result = asyncio.run(inventory.capture(reader))
+        self.assertEqual(reader.details, ['light.fixture'])
+        self.assertEqual(result['entities'][0]['original_device_class'], 'fixture-class')
+
+    def test_detail_command_arguments_remain_closed(self):
+        reader = inventory.HAReader('http://test.invalid', 'not-a-secret')
+        with self.assertRaises(ValueError):
+            asyncio.run(reader.command('config/entity_registry/get'))
+        with self.assertRaises(ValueError):
+            asyncio.run(reader.command('get_states', entity_id='light.fixture'))
+
     def assess(self, data):
         return asyncio.run(inventory.assess(data,COMPONENT))
 
@@ -180,6 +224,33 @@ class ColdExportTest(unittest.TestCase):
         self.assertEqual((self.out/'payload'/cold.REGISTRIES[0]).read_bytes(),(self.config/cold.REGISTRIES[0]).read_bytes())
         self.assertTrue((self.out/'payload'/cold.RUNTIME/'config/empty-private-directory').is_dir())
         for path in (self.out,*self.out.rglob('*')):self.assertEqual(path.stat().st_mode & 0o077,0)
+
+    def test_LF_serial_file_is_preserved_without_asserting_native_canonicalization(self):
+        path = self.config/cold.RUNTIME/'config/device_sn'
+        raw = b'EXISTING-GW-TEST\n';path.write_bytes(raw)
+        self.assertTrue(self.export()['passed'])
+        self.assertTrue(cold.verify(self.out)['passed'])
+        self.assertEqual((self.out/'payload'/cold.RUNTIME/'config/device_sn').read_bytes(), raw)
+        manifest = cold.read_json(self.out/'cold-export.json')
+        self.assertIn('canonicalization pending', manifest['identity']['native_sn_storage_format'])
+        self.assertFalse(manifest['adoption_ready'])
+
+    def test_invalid_serial_encodings_still_refused(self):
+        for raw in (b'NO-TERMINATOR', b'a\0b\n', b'a\nb\n', b'a\r\n', b'\n'):
+            (self.config/cold.RUNTIME/'config/device_sn').write_bytes(raw)
+            with self.assertRaises(ValueError): self.export()
+            self.assertFalse(self.out.exists())
+
+    def test_real_storage_owner_shape_is_accepted_but_class_changes_are_not(self):
+        devices = copy.deepcopy(self.data['devices'])
+        for row in devices: row['config_entry_id'] = row.pop('config_entries')[0]
+        self.write(cold.REGISTRIES[1], {'data': {'devices': devices}})
+        cold.validate_inventory(self.config, self.report)
+        entities = copy.deepcopy(self.data['entities'])
+        entities[0]['original_device_class'] = 'changed'
+        self.write(cold.REGISTRIES[2], {'data': {'entities': entities}})
+        with self.assertRaisesRegex(ValueError, 'registry changed'):
+            cold.validate_inventory(self.config, self.report)
 
     def test_running_owner_never_creates_output(self):
         class Running(Owner):
