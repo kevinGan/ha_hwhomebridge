@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 
-def main(base, repo, runtime, haos, sdk):
+def main(base, repo, runtime, haos, sdk, window_rehearsal=False):
     if (os.geteuid()!=0 or not socket.gethostname().startswith('lima-hwhomebridge-')
             or 'ID=haos' in Path('/etc/os-release').read_text() or base.exists()
             or base.parent != Path('/mnt/data') or not base.name.startswith('hwhomebridge-cold-runtime-test-')):
@@ -57,9 +57,9 @@ def main(base, repo, runtime, haos, sdk):
         if source.is_dir():target.mkdir(parents=True,exist_ok=True)
         else:target.parent.mkdir(parents=True,exist_ok=True);target.touch()
         run('mount','--bind',str(source),str(target));mounts.append(target)
-    def call(action,output,*,name='hwhomebridge-portable-source',target=None,ok=True,env=None):
+    def call(action,output,*,name='hwhomebridge-portable-source',target=None,ok=True,env=None,proof=None):
         args=['chroot',str(haos),'/opt/cold-runtime/cold-backup',action,'--output',str(output)]
-        if action=='export':args+=['--engine','docker','--container',name,'--config',str(config),'--interface','eth0','--preflight',str(preflight)]
+        if action=='export':args+=['--engine','docker','--container',name,'--config',str(config),'--interface','eth0','--preflight',str(proof or preflight)]
         if target:args+=['--target',str(target)]
         completed=run(*args,check=False,env=env)
         save(base/(action+'-'+output.name+'.private.json'),{'returncode':completed.returncode,'stdout':completed.stdout,'stderr':completed.stderr})
@@ -110,6 +110,31 @@ def main(base, repo, runtime, haos, sdk):
         call('verify',base/'export',ok=False);call('restore',base/'export',target=base/'tampered-restore',ok=False)
         assert not (base/'tampered-restore').exists();corrupt.write_bytes(raw)
         result['tampered_export_verify_and_restore_refused']=True
+        if window_rehearsal:
+            # 仅测试容器生命周期；不模拟成 Supervisor/真实 HA 已验收。
+            name='hwhomebridge-portable-source'
+            original_id=json.loads(docker('inspect',name).stdout)[0]['Id']
+            docker('start',name)
+            resumed=json.loads(docker('inspect',name).stdout)[0]
+            assert resumed['Id']==original_id and resumed['State']['Running']
+            result['successful_backup_resumes_same_test_owner']=True
+            # 已恢复运行时，可以继续在新目录离线还原；绝不覆盖源配置。
+            assert call('restore',base/'export',target=base/'restore-after-resume')['passed']
+            result['offline_restore_while_original_test_owner_runs']=True
+            bad_proof=base/'stale-preflight.private.json'
+            save(bad_proof,{**report,'registry_sha256':'stale-synthetic-proof'})
+            docker('stop','-t','0',name)
+            try:
+                call('export',base/'stale-window-refused',proof=bad_proof,ok=False)
+            finally:
+                # 演练失败收尾。生产恢复需按运行手册核对源完整性后人工执行。
+                docker('start',name)
+            resumed=json.loads(docker('inspect',name).stdout)[0]
+            assert resumed['Id']==original_id and resumed['State']['Running']
+            result['failed_backup_resumes_same_test_owner_without_export']=True
+            result['real_Supervisor_stop_start_tested']=False
+            result['real_HA_or_SDK_started']=False
+            docker('stop','-t','0',name)
         assert before=={n:cold.read_file(config/n)[1] for n in cold.source_files(config)}
         result.update(source_bytes_and_metadata_unchanged=True,passed=True)
     finally:
@@ -154,4 +179,5 @@ if __name__=='__main__':
     os.umask(0o077)
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('base','repo','runtime','haos','sdk'):parser.add_argument('--'+name,type=Path,required=True)
-    args=parser.parse_args();main(args.base,args.repo,args.runtime,args.haos,args.sdk)
+    parser.add_argument('--window-rehearsal',action='store_true')
+    args=parser.parse_args();main(args.base,args.repo,args.runtime,args.haos,args.sdk,args.window_rehearsal)

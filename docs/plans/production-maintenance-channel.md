@@ -63,3 +63,5 @@ python3 tools/ha_legacy_binding_audit.py --url http://<原机地址> \
 宿主免安装运行时已在独立环境准备，见[便携冷备运行时](../portable-cold-runtime.md)：随包带固定哈希的 Python 和依赖，原机不必安装 Python；已在官方 HA OS 18.3 用户空间验证，但尚未传入或运行于原机。下一步顺序：刷新只读清单并保留旧绑定歧义 → 另行安排维护窗口生成真实冷备 → 审阅冻结旧绑定和实体问题 → 原身份离线转换、正式父 SN 及原生目录验证 → 才能安排单网关安装、启用与回退。此次没有生成生产冷备，也没有更新原 HA。
 
 本轮按 TypeSafe 技能由 Jev 对“宿主 SSH / Core 文件入口”和“配置重放 / 实际绑定证据”分类，见[脱敏结果](../../experiments/openharmony_bridge/evidence/jev-maintenance-routing.json)；授权后又对[单条公钥追加操作](../../experiments/openharmony_bridge/evidence/jev-host-key-append-routing.json)归类。复杂判断、身份、用户授权和通过条件由 Codex 与确定性代码负责。工具运行不依赖 AI。
+
+同日后续：已再次刷新原机只读清单、已有日志和宿主证据，32 个旧设备、书房 13 个角色和 7 张组合卡未变，两个接管阻塞仍保留；38 个组件文件、原条目、Core 身份/启动时间及 watchdog/boot 原值不变。新增离线观察复核工具及[冷备窗口执行和恢复手册](production-cold-maintenance-window.md)，独立真实 Docker 演练成功冷备、陈旧清单失败后的同一测试所有者恢复和在线后离线还原。没有实测真实 Supervisor 启停，没有触碰原机配对 KV、设备或自动化。
