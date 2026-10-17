@@ -73,3 +73,5 @@ python3 ha_upgrade.py restore --config "$HA_CONFIG" --container "$HA_CONTAINER" 
 Jev 本轮只将条目、进程所有权、失败回退、安装四类缺口归类，见[脱敏分类结果](../../experiments/openharmony_bridge/evidence/jev-ha-lifecycle-routing.json)；身份密码格式、生命周期实现、故障判定和验收由 Codex 核对。
 
 下一步先补生产冷备导出与清单预检，把原条目、旧子身份、实际实体角色和自定义适配完整导出；再补全量安装/HACS 升级和目标架构的发行验收。获得维护窗口后才执行原 HA 接管及真实灯光、风扇验收。本轮未访问原 HA、未改动现有桥接或米家自动化，也没有把实验父身份替换到生产。
+
+后续进展：[生产冷备导出与真实清单预检](production-cold-export.md)的工具已完成独立 Linux 验证。原 HA 仅做只读采集，32 个原设备可识别，书房 13 个角色及 7 张补充卡状态投影通过；旧灯映射歧义和不可用灯组仍需处理。实际生产冷备、正式父 SN/原生目录、安装及 App 验收尚未进行，不沿用实验身份绕过这些门槛。
