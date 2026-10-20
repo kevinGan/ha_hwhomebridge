@@ -8,7 +8,8 @@ import sys
 import time
 import urllib.request
 
-from legacy_callbacks import LegacyCallbacks
+from availability import SourceUnavailable
+from legacy_callbacks import LegacyCallbacks, LegacyPublisher
 
 
 def save(path, value):
@@ -54,12 +55,20 @@ def main(mode, directory):
             data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
         with opener.open(request, timeout=10) as response:
             result = json.load(response)
+        if result.get('available') is False:
+            raise SourceUnavailable('HA source unavailable')
         if not result['ok']:
             raise ValueError('HA rejected SDK request')
         return result['state']
     state = {'sdk_started': False, 'device_status': 0, 'native_SN_confirmed': False}
-    callbacks = LegacyCallbacks(catalog, root, state,
-        {row['sn'].encode(): bridge(row['key']) for row in catalog})
+    snapshots = {}
+    for row in catalog:
+        try:
+            snapshots[row['sn'].encode()] = bridge(row['key'])
+        except SourceUnavailable:
+            pass
+    callbacks = LegacyCallbacks(catalog, root, state, snapshots)
+    publisher = LegacyPublisher(library, callbacks)
     library.RegHomeAssistantPyCB(callbacks.action, callbacks.kind, callbacks.status, callbacks.notify, callbacks.get)
     library.RegPINQueryCallback(callbacks.pin)
     if library.main():
@@ -70,7 +79,6 @@ def main(mode, directory):
         stop = True
     signal.signal(signal.SIGTERM, terminate)
     signal.signal(signal.SIGINT, terminate)
-    registered, reported = False, {}
     while not stop:
         while callbacks.pending:
             sn, raw = callbacks.pending.popleft()
@@ -88,21 +96,15 @@ def main(mode, directory):
             try:
                 callbacks.update(sn, bridge(row['key']))
             except (OSError, ValueError):
+                publisher.invalidate(sn)
                 state['backend_read_failures'] = state.get('backend_read_failures', 0) + 1
         sn = library.GetGatewaySN()
         if sn and sn.decode() != root['sn']:
             raise ValueError('native SDK identity changed')
         state.update(sdk_started=True, native_SN_confirmed=bool(sn), device_status=library.HILINK_GetDevStatus())
-        if state['device_status'] == 1:
-            if not registered:
-                for sn in callbacks.children:
-                    library.HilinkSyncBrgDevStatus(sn, 1)  # 仅上线已有旧子设备，绝不重新绑定。
-                registered = True
-            for sn, services in callbacks.encoded.items():
-                for sid, value in services.items():
-                    if reported.get((sn, sid)) != value:
-                        library.UpdateHAStatus(sn, sid.encode(), value)
-                        reported[sn, sid] = value
+        publisher.publish(state['device_status'] == 1)
+        state['available_children'] = len(callbacks.encoded)
+        state['unavailable_children'] = len(callbacks.children) - len(callbacks.encoded)
         save(directory / 'legacy-status.json', state)
         for _ in range(10):
             if stop:

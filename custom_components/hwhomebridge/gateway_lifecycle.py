@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import threading
 
+from .availability import SourceUnavailable
 from .gateway_router import GatewayRouter
 from .openharmony.transport import make_server
 
@@ -58,7 +59,10 @@ class GatewayLifecycle:
                 desired = (self.state.get('last_good') or 'disabled') if interrupted or self.state['active'] != 'disabled' else 'disabled'
             if desired != 'disabled':
                 for row in self.deployment.catalog:
-                    await self.hass.async_add_executor_job(self.router.snapshot, row['key'])
+                    try:
+                        await self.hass.async_add_executor_job(self.router.snapshot, row['key'])
+                    except SourceUnavailable:
+                        _LOGGER.info('Gateway child source unavailable at startup; isolated until recovery')
                 self.server = await self.hass.async_add_executor_job(make_server, self.router, self.deployment.port)
                 self.thread = threading.Thread(target=self.server.serve_forever, daemon=True, name='hwhomebridge-gateway')
                 self.thread.start()
@@ -153,18 +157,19 @@ class GatewayLifecycle:
         with (spec.directory / 'openharmony.private.log').open('rb') as stream:
             stream.seek(self.log_offset)
             parent_online = False
-            children_online = set()
+            children_synced = set()
             for line in stream.read().decode(errors='replace').splitlines():
                 try:
                     if line.startswith('POC '):
                         parent_online |= json.loads(line[4:]).get('event') == 'cloud_online'
                     elif line.startswith('HA '):
                         response = json.loads(line[3:])
-                        if response.get('phase') == 3 and response.get('code') == 0 and response.get('failures') == 0:
-                            children_online.add(response['key'])
+                        if (response.get('phase') == 3 and response.get('accepted') is True
+                                and response.get('code') == 0 and response.get('failures') == 0):
+                            children_synced.add(response['key'])
                 except (ValueError, KeyError):
                     continue
-        return parent_online and {row['key'] for row in spec.catalog} <= children_online
+        return parent_online and {row['key'] for row in spec.catalog} <= children_synced
 
     async def _watch(self, process, mode):
         await process.wait()

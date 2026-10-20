@@ -140,6 +140,8 @@ class GatewayDeployment:
             if mac.read_text().strip().lower() != self.settings['source_mac'].lower():
                 raise ValueError('legacy rollback requires the original source network interface MAC')
             return
+        if self.settings.get('availability_protocol') != 1:
+            raise ValueError('managed OpenHarmony directory requires availability protocol 1; rebuild offline before switching')
         for path, name in [(self.binary, 'binary_sha256'), (self.probe, 'probe_sha256')]:
             private_path(path)
             if not os.access(path, os.X_OK) or digest(path.read_bytes()) != self.settings[name]:

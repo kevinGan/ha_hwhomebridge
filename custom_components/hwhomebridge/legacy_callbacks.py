@@ -20,7 +20,7 @@ class LegacyCallbacks:
         @C.CFUNCTYPE(None, C.c_char_p, C.c_char_p)
         def action(sn, payload):
             state['action_callbacks'] = state.get('action_callbacks', 0) + 1
-            if sn not in self.children or not payload:
+            if sn not in self.encoded or not payload:
                 return
             # SDK线程栈很小；回调禁止HTTP、JSON转换或再次调用SDK。
             if len(self.pending) < 32:
@@ -60,8 +60,40 @@ class LegacyCallbacks:
         self.action, self.kind, self.status = action, kind, status
         self.notify, self.get, self.pin = notify, get, pin
 
+    def invalidate(self, sn):
+        self.cache.pop(sn, None)
+        self.encoded.pop(sn, None)
+
     def update(self, sn, snapshot):
         encoded = {sid: json.dumps(value, separators=(',', ':')).encode() for sid, value in snapshot.items()}
         if any(len(value) >= 1024 for value in encoded.values()):
             raise ValueError('legacy cached response too large')
         self.cache[sn], self.encoded[sn] = snapshot, encoded
+
+
+class LegacyPublisher:
+    """主线程同步每个旧子设备的在线状态；不注册、不解绑、不缓存离线值。"""
+    def __init__(self, library, callbacks):
+        self.library, self.callbacks = library, callbacks
+        self.announced, self.reported = {}, {}
+
+    def invalidate(self, sn):
+        self.callbacks.invalidate(sn)
+        self.reported = {key: value for key, value in self.reported.items() if key[0] != sn}
+
+    def publish(self, root_online):
+        if not root_online:
+            self.announced.clear()
+            self.reported.clear()
+            return
+        for sn in self.callbacks.children:
+            available = sn in self.callbacks.encoded
+            if self.announced.get(sn) != available:
+                self.library.HilinkSyncBrgDevStatus(sn, int(available))
+                self.announced[sn] = available
+            if not available:
+                continue
+            for sid, value in self.callbacks.encoded[sn].items():
+                if self.reported.get((sn, sid)) != value:
+                    self.library.UpdateHAStatus(sn, sid.encode(), value)
+                    self.reported[sn, sid] = value

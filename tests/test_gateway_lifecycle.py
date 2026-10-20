@@ -73,19 +73,19 @@ class LifecycleTests(unittest.TestCase):
             self.assertFalse(any(call[0]=='launch' for call in runtime.calls))
             self.assertEqual(runtime.state['failed_backend'],'openharmony')
 
-    def test_parent_online_does_not_complete_startup_until_every_child_acknowledges(self):
+    def test_parent_online_requires_valid_ack_for_online_and_offline_children(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Engine(Path(directory))
             runtime.deployment.catalog = [{'key':'old-light'}, {'key':'new-fan'}]
             runtime.log_offset = 0
             log = Path(directory) / 'openharmony.private.log'
-            log.write_text('POC {"event":"cloud_online"}\nHA {"key":"old-light","phase":3,"code":0,"failures":0}\n')
+            log.write_text('POC {"event":"cloud_online"}\nHA {"key":"old-light","phase":3,"code":0,"failures":0,"accepted":true,"available":true}\n')
             self.assertFalse(runtime._ready('openharmony'))
             with log.open('a') as stream:
                 stream.write('HA {"key":"new-fan","phase":3,"code":0,"failures":1}\n')
             self.assertFalse(runtime._ready('openharmony'))
             with log.open('a') as stream:
-                stream.write('HA {"key":"new-fan","phase":3,"code":0,"failures":0}\n')
+                stream.write('HA {"key":"new-fan","phase":3,"code":0,"failures":0,"accepted":true,"available":false}\n')
             self.assertTrue(runtime._ready('openharmony'))
 
     def test_original_entry_with_managed_options_keeps_legacy_entry_type(self):

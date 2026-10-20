@@ -36,6 +36,7 @@ async def make_hass():
     def sync():
         for entity,state in states.items():hass.states.async_set(entity,state['state'],state['attributes'])
         save(CONFIG/'fixture-states.private.json', states)
+    hass.data['hwhomebridge_virtual_fixture'] = {'states': states, 'sync': sync}
     async def service(call):
         entity=call.data['entity_id'];assert entity in states
         state=states[entity]

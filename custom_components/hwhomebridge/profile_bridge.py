@@ -3,6 +3,8 @@ import json
 import math
 from datetime import datetime, timedelta, timezone
 
+from .availability import require_state
+
 
 class ProfileBridge:
     """只暴露已有 HA 映射的 characteristic；profile 中其余能力不冒充支持。"""
@@ -44,8 +46,7 @@ class ProfileBridge:
                 definition = self.device.product.services[internal]
                 mapping = definition.ha_mapping
                 entity_state = self.router._hass.states.get(self.device.get_entity_for_service(internal))
-                if entity_state is None or entity_state.state in ('unavailable', 'unknown'):
-                    raise ValueError('mapped HA state unavailable')
+                require_state(entity_state)
                 if mapping.value_mapping and mapping.value_mapping.mapping_type == 'delay_to_select':
                     entity = self.device.get_entity_for_service(internal)
                     state = self.router._hass.states.get(entity)
@@ -68,7 +69,7 @@ class ProfileBridge:
                     raw = self.router.get_char_state(self.device.sn, definition.c_service_id or internal)
                     values = json.loads(raw) if raw else {}
                     if name not in values:
-                        raise ValueError('mapped HA state unavailable')
+                        raise ValueError('mapped characteristic missing from HA projection')
                     merged[name] = values[name]
             result[sid] = merged
         return result
@@ -105,6 +106,7 @@ class ProfileBridge:
             expected = next(iter(fields.values()))[0] if timer else fields[next(iter(command))][0]
             if self.router._determine_target_service(command, self.device) != expected:
                 raise ValueError('legacy command cannot preserve the explicit service')
+        self.snapshot()
         for command in commands:
             if not self.router.route_action(self.device.sn, command):
                 raise ValueError('public HA router rejected command')

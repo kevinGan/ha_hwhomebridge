@@ -27,8 +27,7 @@ class ScopedTransport:
 
     def filter_states(self, states):
         result = {s["entity_id"]: s for s in states if s["entity_id"] in self.allowed}
-        if set(result) != self.allowed:
-            raise ValueError("configured entities are missing")
+        # 缺失实体由各卡片在读取自身依赖时判断，不能拖累其他卡片。
         return result
 
 

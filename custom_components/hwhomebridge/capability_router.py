@@ -6,6 +6,7 @@ import math
 import time
 import asyncio
 
+from .availability import require_state
 from .product_matcher import DeviceInfo, ProductMatcher
 from .service_router import ServiceRouter
 from .fan_mapping import fan_command, fan_state, is_mapped_fan
@@ -106,10 +107,7 @@ class CapabilityRouter(ServiceRouter):
         return int(state["state"] == "on")
 
     def state(self, states, sn, role):
-        result = states[self.entity(sn, role)]
-        if result["state"] in ("unknown", "unavailable"):
-            raise ValueError("HA entity unavailable")
-        return result
+        return require_state(states.get(self.entity(sn, role)))
 
     def snapshot(self, key, states=None):
         if key not in self.devices:
@@ -228,6 +226,8 @@ class CapabilityRouter(ServiceRouter):
             self.registry.validate_value(device.product.pid, sid, name, value, write=not count_echo)
             if count_echo and (not isinstance(data.get("timer"), list) or value != len(data["timer"])):
                 raise ValueError("timer count does not match array")
+        # 不用离线前的值判断写入成功；读取失败时不调用 HA 控制服务。
+        self.snapshot(key)
         if timers_for_mapping(mapping):
             self.timer_protocol.write(self.timer_controller(sn), sn, sid, mapping, field, data)
             return self.snapshot(key)

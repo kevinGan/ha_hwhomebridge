@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import math
 
+from .availability import require_state
 from .role_binding import integer
 
 
@@ -99,13 +100,7 @@ class NativeTimerController:
         self.wait = wait
 
     def state(self, states, role):
-        try:
-            state = states[self.bindings.entity(role)]
-        except KeyError:
-            raise ValueError("native timer entity missing") from None
-        if state["state"] in ("unknown", "unavailable"):
-            raise ValueError("native timer entity unavailable")
-        return state
+        return require_state(states.get(self.bindings.entity(role)))
 
     def enabled(self, timer, states):
         value = self.state(states, timer.enable)["state"]

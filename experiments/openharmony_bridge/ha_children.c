@@ -22,7 +22,9 @@ enum ChildPhase { CHILD_BIND = 1, CHILD_SYNC, CHILD_ONLINE, CHILD_READY };
 #include <time.h>
 /* 身份文件沿用 v1 的 on=0 保留字段；真实状态始终由 HA 读取，不从此字段恢复。 */
 struct HaChild {
-    bool enabled, connected, pending, dirty;
+    bool enabled, connected, pending, dirty, available, sent_available;
+    int announced;
+    time_t retry_at;
     char parent_sn[40], sn[40], udid[65], dev_id[129], mac[18];
     char key[32], state_path[80], temp_path[80];
     const cJSON *definition;
@@ -142,7 +144,7 @@ int PocHaInit(const char *parent_sn, bool enabled) {
             !string_field(ha_child.definition, "pid") || !string_field(ha_child.definition, "devType") ||
             !string_field(ha_child.definition, "manu") || !cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "services"))) return -1;
         for (size_t j = 0; j < i; ++j) if (!strcmp(children[j].key, key)) return -1;
-        strcpy(ha_child.key, key); strcpy(ha_child.parent_sn, parent_sn); ha_child.enabled = true;
+        strcpy(ha_child.key, key); strcpy(ha_child.parent_sn, parent_sn); ha_child.enabled = true; ha_child.announced = -1;
         snprintf(ha_child.state_path, sizeof(ha_child.state_path), "ha-child-%s.json", key);
         snprintf(ha_child.temp_path, sizeof(ha_child.temp_path), "ha-child-%s.tmp", key);
         char input[128], hash[65]; snprintf(input, sizeof(input), "%s#ha-%s-v1", parent_sn, key);
@@ -171,7 +173,7 @@ int PocHaInit(const char *parent_sn, bool enabled) {
 bool PocHaEnabled(void) { return child_count > 0; }
 bool PocHaMatches(const char *device_id) { return find_child(device_id) != NULL; }
 /* Linux loopback backend; the standalone deployment connects directly to HA. */
-static cJSON *ha_request(const char *sid, const cJSON *value) {
+static cJSON *backend_request(const char *sid, const cJSON *value) {
     cJSON *request = cJSON_CreateObject();
     if (!request) return NULL;
     cJSON_AddStringToObject(request, "key", ha_child.key);
@@ -217,10 +219,27 @@ static cJSON *ha_request(const char *sid, const cJSON *value) {
     char *payload = strstr(response, "\r\n\r\n");
     if (!payload || strncmp(response, "HTTP/1.0 200 ", 13)) return NULL;
     cJSON *json = cJSON_ParseWithOpts(payload+4, NULL, true);
+    return json;
+}
+static void source_state(bool available) {
+    ha_child.available = available;
+    if (!available) {
+        free(ha_child.reported); ha_child.reported = NULL;
+        ha_child.dirty = true;
+    }
+}
+static cJSON *ha_request(const char *sid, const cJSON *value) {
+    cJSON *json = backend_request(sid, value);
     const cJSON *state = cJSON_GetObjectItemCaseSensitive(json, "state");
-    cJSON *result = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "ok")) && cJSON_IsObject(state) ? cJSON_Duplicate(state, true) : NULL;
+    bool available = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "ok")) &&
+        !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "available")) && cJSON_IsObject(state);
+    /* 普通写入校验失败不等于设备离线；读取失败和传输中断必须清掉旧状态。 */
+    if (available || !sid || !json || cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "available")))
+        source_state(available);
+    cJSON *result = available ? cJSON_Duplicate(state, true) : NULL;
     cJSON_Delete(json); return result;
 }
+
 static bool has_service(const char *sid) {
     return sid && cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "services"), sid);
 }
@@ -289,7 +308,7 @@ static IotcJson *build_online(M2mCloudContext *ctx) {
     cJSON_AddItemToArray(array, item);
     if (!cJSON_AddStringToObject(item, "devId", ha_child.dev_id) ||
         !cJSON_AddStringToObject(item, "gatewayId", ctx->authInfo.loginInfo.devId) ||
-        !cJSON_AddStringToObject(item, "status", "online")) { cJSON_Delete(array); return NULL; }
+        !cJSON_AddStringToObject(item, "status", ha_child.sent_available ? "online" : "offline")) { cJSON_Delete(array); return NULL; }
     return array;
 }
 static void response(enum ChildPhase phase, const CoapPacket *packet, bool timeout) {
@@ -331,7 +350,15 @@ static void response(enum ChildPhase phase, const CoapPacket *packet, bool timeo
     cJSON_Delete(json);
     if (!ok) { note("child_cloud_step_failed", phase); return; }
     ha_child.attempts = 0; ha_child.phase = phase + 1;
-    note(phase == CHILD_BIND ? "child_registered" : phase == CHILD_SYNC ? "child_info_synced" : "child_online", 0);
+    if (phase == CHILD_ONLINE) ha_child.announced = ha_child.sent_available;
+    const char *event = "child_registered";
+    if (phase == CHILD_SYNC) event = "child_info_synced";
+    if (phase == CHILD_ONLINE) {
+        event = ha_child.sent_available ? "child_online" : "child_offline";
+        printf("HA {\"key\":\"%s\",\"phase\":3,\"code\":0,\"failures\":0,"
+            "\"accepted\":true,\"available\":%s}\n", ha_child.key, ha_child.sent_available ? "true" : "false");
+    }
+    note(event, 0);
     if (ha_child.phase == CHILD_READY) ha_child.dirty = true;
 }
 static void bind_response(const CoapPacket *packet, const SocketAddr *address, void *user, bool timeout) {
@@ -351,29 +378,45 @@ static void tick_child(int32_t id, void *data) {
         if (!ha_child.dirty && time(NULL) - ha_child.reported_at < 5) return;
         ha_child.reported_at = time(NULL);
         cJSON *snapshot = ha_request(NULL, NULL);
-        if (!snapshot) return;
-        char *serialized = cJSON_PrintUnformatted(snapshot);
-        if (!serialized) {cJSON_Delete(snapshot); return;}
-        if (!ha_child.dirty && ha_child.reported && !strcmp(serialized, ha_child.reported)) {
-            free(serialized); cJSON_Delete(snapshot); return;
+        if (ha_child.announced != (int)ha_child.available) {
+            cJSON_Delete(snapshot);
+            ha_child.phase = CHILD_ONLINE; ha_child.attempts = 0;
+            ha_child.retry_at = 0;
+        } else if (!snapshot) return;
+        else {
+            char *serialized = cJSON_PrintUnformatted(snapshot);
+            if (!serialized) {cJSON_Delete(snapshot); return;}
+            if (!ha_child.dirty && ha_child.reported && !strcmp(serialized, ha_child.reported)) {
+                free(serialized); cJSON_Delete(snapshot); return;
+            }
+            cJSON *array = cJSON_CreateArray();
+            const cJSON *entry;
+            cJSON_ArrayForEach(entry, snapshot) {
+                if (!has_service(entry->string)) continue;
+                cJSON *item = cJSON_CreateObject();
+                if (!item) {cJSON_Delete(array); array=NULL; break;}
+                cJSON_AddItemToArray(array, item);
+                cJSON_AddStringToObject(item, "devId", ha_child.dev_id);
+                cJSON_AddStringToObject(item, "sid", entry->string);
+                cJSON_AddItemToObject(item, "data", cJSON_Duplicate(entry, true));
+            }
+            int ret = array ? M2mCloudReportMessage(array, ctx) : -1;
+            cJSON_Delete(array); cJSON_Delete(snapshot); note("ha_report_queued", ret);
+            if (!ret) {free(ha_child.reported); ha_child.reported = serialized; ha_child.dirty=false;} else free(serialized);
+            return;
         }
-        cJSON *array = cJSON_CreateArray();
-        const cJSON *entry;
-        cJSON_ArrayForEach(entry, snapshot) {
-            if (!has_service(entry->string)) continue;
-            cJSON *item = cJSON_CreateObject();
-            if (!item) {cJSON_Delete(array); array=NULL; break;}
-            cJSON_AddItemToArray(array, item);
-            cJSON_AddStringToObject(item, "devId", ha_child.dev_id);
-            cJSON_AddStringToObject(item, "sid", entry->string);
-            cJSON_AddItemToObject(item, "data", cJSON_Duplicate(entry, true));
-        }
-        int ret = array ? M2mCloudReportMessage(array, ctx) : -1;
-        cJSON_Delete(array); cJSON_Delete(snapshot); note("ha_report_queued", ret);
-        if (!ret) {free(ha_child.reported); ha_child.reported = serialized; ha_child.dirty=false;} else free(serialized);
-        return;
     }
-    if (ha_child.pending || ha_child.attempts >= 3) return;
+    if (ha_child.pending) return;
+    if (ha_child.attempts >= 3) {
+        if (ha_child.phase != CHILD_ONLINE || time(NULL) < ha_child.retry_at) return;
+        ha_child.attempts = 0;
+    }
+    if (ha_child.phase == CHILD_ONLINE) {
+        cJSON *snapshot = ha_request(NULL, NULL);
+        cJSON_Delete(snapshot);
+        ha_child.sent_available = ha_child.available;
+        ha_child.retry_at = time(NULL) + 30;
+    }
     static const char *bind_uri[] = {"device", "v3", "batchBind"};
     static const char *sync_uri[] = {".sys", "devInfoSync"};
     static const char *online_uri[] = {".sys", "statusSync"};
@@ -401,6 +444,8 @@ static void tick(int32_t id, void *data) {
 void PocHaCloudOnline(void) {
     for (size_t i=0; i<child_count; ++i) {
         current=&children[i]; ha_child.connected=true; ha_child.pending=false; ha_child.attempts=0;
+        ha_child.announced=-1; ha_child.retry_at=0;
+        free(ha_child.reported); ha_child.reported=NULL; ha_child.dirty=true;
         /* 旧SDK离线接管保留云端已有元数据，只上线，不覆盖其UDID或重新绑定。 */
         bool imported = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ha_child.definition, "existing_cloud_only"));
         if (!ha_child.dev_id[0]) ha_child.phase = CHILD_BIND;

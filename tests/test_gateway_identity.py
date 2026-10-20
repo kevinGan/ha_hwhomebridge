@@ -2,7 +2,7 @@
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from framework_imports import load
 
@@ -13,6 +13,16 @@ products = load('product_registry')
 
 
 class GatewayIdentityTest(unittest.TestCase):
+    def test_old_managed_native_directory_is_refused_before_executable_or_probe_access(self):
+        target = object.__new__(deployment.GatewayDeployment)
+        target.interface, target.settings = 'fixture0', {}
+        target.verify_source = Mock()
+        target.verify_catalog = Mock()
+        target.verify_inputs = Mock()
+        with patch.object(deployment.socket, 'if_nameindex', return_value=[(1, 'fixture0')]):
+            with self.assertRaisesRegex(ValueError, 'availability protocol 1'):
+                target.verify_engine('openharmony')
+
     def test_frozen_mapping_fingerprint_changes_when_control_semantics_change(self):
         product = products.ProductDef('002', services={'switch': products.ServiceDef('switch', 'switch', 'on',
             ha_mapping=products.HAMapping(domain='light', action='turn_on_off'))})

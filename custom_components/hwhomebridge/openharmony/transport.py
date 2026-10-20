@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .configuration import integer, unique_object
+from ..availability import SourceUnavailable
 from ..ha_transport import ScopedTransport, HomeAssistantTransport
 
 
@@ -74,7 +75,9 @@ def make_server(router, port, read_only=False):
                     raise ValueError("read-only backend")
                 with lock:
                     state = router.write(request["key"], request["sid"], request["data"]) if "data" in request else router.snapshot(request["key"])
-                response = {"ok": True, "state": state}
+                response = {"ok": True, "available": True, "state": state}
+            except SourceUnavailable:
+                response = {"ok": False, "available": False, "error": "SourceUnavailable"}
             except Exception as error:
                 response = {"ok": False, "error": type(error).__name__}
             payload = json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()

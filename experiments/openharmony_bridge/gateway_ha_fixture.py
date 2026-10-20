@@ -56,7 +56,7 @@ def prepare(config, source, native):
     save(directory / 'deployment.json', {'version': 1, 'entry_unique_id': 'hwhomebridge',
         'input_sha256': {str(path.relative_to(directory)):hashlib.sha256(path.read_bytes()).hexdigest() for path in inputs},
         'root_id_sha256': receipt['root_id_sha256'], 'source_mac': '52:55:55:60:3b:0e',
-        'interface': 'eth0', 'port': 18093, 'lan_port': 15686, 'startup_timeout': 60, 'profiles': hashes,
+        'availability_protocol': 1, 'interface': 'eth0', 'port': 18093, 'lan_port': 15686, 'startup_timeout': 60, 'profiles': hashes,
         'binary_sha256': hashlib.sha256((native / 'bridge_poc').read_bytes()).hexdigest(),
         'probe_sha256': hashlib.sha256((native / 'identity_state_probe').read_bytes()).hexdigest()})
     for p in config.rglob('*'):
