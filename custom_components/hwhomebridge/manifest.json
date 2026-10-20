@@ -1,7 +1,7 @@
 {
   "domain": "hwhomebridge",
   "name": "HuaweiHome Bridge",
-  "version": "1.1.0b7",
+  "version": "1.1.0b8",
   "config_flow": true,
   "documentation": "https://github.com/Wangxiaokang666-666/ha_hwhomebridge",
   "issue_tracker": "https://github.com/Wangxiaokang666-666/ha_hwhomebridge/issues",

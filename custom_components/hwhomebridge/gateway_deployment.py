@@ -128,6 +128,8 @@ class GatewayDeployment:
     def verify_engine(self, engine):
         if engine not in ('legacy', 'openharmony'):
             raise ValueError('unknown managed engine')
+        if self.settings.get('offline_preparation') is True:
+            raise ValueError('offline production preparation cannot start an engine; exclusive handover required')
         if self.interface not in {name for _, name in socket.if_nameindex()}:
             raise ValueError('configured network interface is missing')
         self.verify_source()

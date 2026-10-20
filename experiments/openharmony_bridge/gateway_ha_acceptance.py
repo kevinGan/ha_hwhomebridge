@@ -48,6 +48,19 @@ async def make_hass():
             elif call.service=='turn_off':state['state']='off'
             elif call.service=='set_percentage':state['state']='on' if values['percentage'] else 'off'
             state['attributes'].update(values)
+        # 虚构设备自行处理原生定时；这属于设备夹具，不是桥接内的软件倒计时。
+        instance = json.loads((BASE / 'instances.json').read_text())
+        for source in instance['devices']:
+            roles = source['roles']
+            for target in ('fan', 'light'):
+                enable = roles[target + '_timer_enable']
+                if entity == enable:
+                    remaining = roles[target + '_timer_remaining']
+                    duration = roles[target + '_timer_duration']
+                    states[remaining]['state'] = states[duration]['state'] if state['state'] == 'on' else '0'
+        with (CONFIG / 'fixture-service-calls.private.jsonl').open('a') as stream:
+            stream.write(json.dumps({'time': time.time(), 'domain': call.domain, 'service': call.service,
+                                     'entity': entity, 'values': values}) + '\n')
         sync()
     sync()
     result=await bootstrap.async_from_config_dict({'homeassistant':{'name':'Single existing gateway lifecycle fixture',

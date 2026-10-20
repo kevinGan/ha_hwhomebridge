@@ -17,7 +17,7 @@ def validate_compositions(registry):
         keys = set()
         primary_count = 0
         for card in cards:
-            if not isinstance(card, dict) or set(card) - {"key", "pid", "services", "primary"}:
+            if not isinstance(card, dict) or set(card) - {"key", "pid", "services", "primary", "primary_role", "share_when_primary_preserved"}:
                 raise ValueError("invalid composition card")
             key = card.get("key")
             if not isinstance(key, str) or not re.fullmatch(r"[a-z0-9-]{1,31}", key) or key in keys:
@@ -26,9 +26,17 @@ def validate_compositions(registry):
             if type(card.get("primary", False)) is not bool:
                 raise ValueError("primary must be boolean")
             primary_count += int(card.get("primary", False))
+            role = card.get("primary_role")
+            if role is not None and (not card.get("primary") or not isinstance(role, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", role)):
+                raise ValueError("primary_role requires a primary card and a declared role")
             definition = registry.get_product(card.get("pid"))
             if definition is None:
                 raise ValueError("unknown composition PID")
+            shared = card.get("share_when_primary_preserved", [])
+            if (not isinstance(shared, list) or any(not isinstance(sid, str) for sid in shared)
+                    or len(set(shared)) != len(shared) or set(shared) - set(definition.services)
+                    or shared and card.get("primary")):
+                raise ValueError("only declared supplement services may share primary controls")
             overrides = card.get("services", {})
             if not isinstance(overrides, dict) or set(overrides) - set(definition.services):
                 raise ValueError("composition cannot invent Huawei services")
@@ -80,6 +88,19 @@ def _controls(device):
     return result
 
 
+def _plain_binary_control(device, sid):
+    """只允许相同实体的普通开关共享；参数、映射和副作用不能借此绕过查重。"""
+    service = device.product.services[sid]
+    mapping = service.ha_mapping
+    entry = device.service_entries.get(sid)
+    if (entry is None or service.char_name != "on" or mapping.action != "turn_on_off"
+            or mapping.domain not in ("light", "switch", "fan")
+            or mapping.value_attr not in (None, "state") or mapping.value_mapping is not None
+            or mapping.options or mapping.on_command or mapping.stop_option):
+        return None
+    return entry.entity_id, mapping.action, None
+
+
 def service_dependencies(device, bindings):
     entities = {entry.entity_id for entry in device.service_entries.values()}
     for service in device.product.services.values():
@@ -104,10 +125,14 @@ def plan_composition(registry, sn_manager, product, source, parent_identity,
     existing = sn_manager.get_by_device_id(source["id"])
     if existing and any(entry.entity_id not in owned_entities for entry in existing.service_entries.values()):
         raise ValueError("existing primary does not belong to supplied device inventory")
+    preserving_primary = existing is not None and any(card.get("primary") for card in registry.bundles[product.composition])
     preserved, devices = {}, {}
     for card in registry.bundles[product.composition]:
         key = prefix + card["key"]
         if card.get("primary") and existing is not None:
+            role = card.get("primary_role")
+            if role and (not _controls(existing) or {control[0] for control in _controls(existing)} != {bindings.entity(role)}):
+                raise ValueError("existing primary controls do not match the declared primary role")
             preserved[key] = existing
             continue
         pid = card["pid"]
@@ -129,7 +154,15 @@ def plan_composition(registry, sn_manager, product, source, parent_identity,
         device.card_key = key
         device.parent_identity = parent_identity
         _bind_product(registry, device, bindings)
-        if existing and _controls(existing) & _controls(device):
+        shared = set()
+        if preserving_primary:
+            original_binary = {_plain_binary_control(existing, sid) for sid in existing.service_entries}
+            for sid in card.get("share_when_primary_preserved", []):
+                control = _plain_binary_control(device, sid)
+                if control is None or control not in original_binary:
+                    raise ValueError("shared service has no equivalent plain primary switch")
+                shared.add(control)
+        if existing and (_controls(existing) & _controls(device)) - shared:
             raise ValueError("composition duplicates an existing primary control; preserve the primary or choose a separate capability card")
         old = sn_manager.get_by_sn(sn)
         if old and (old.ha_device_id != logical_id or old.product.pid != pid):

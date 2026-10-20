@@ -106,6 +106,54 @@ def make_router(configuration=None, config=FIXTURE, transport=None, manager=None
 
 
 class PublicRoleCompositionTests(unittest.TestCase):
+    def test_preserved_primary_explicitly_shares_an_equivalent_plain_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'mapping'
+            shutil.copytree(FIXTURE, config)
+            path = config / 'compositions.json'
+            data = json.loads(path.read_text())
+            data['bundles']['fan_light'][0]['primary_role'] = 'main'
+            # 额外风扇卡上的开关临时声明为主灯开关；其他风扇功能仍保留。
+            data['bundles']['fan_light'][1].update(
+                services={'switch': {'role': 'main', 'domain': 'light', 'action': 'turn_on_off'}},
+                share_when_primary_preserved=['switch'])
+            path.write_text(json.dumps(data))
+            old = legacy.ServiceRouter()
+            asyncio.run(old.load_product_registry(str(COMPONENT / 'config/product_registry.json')))
+            primary = old.register_device('alpha', 'fixture bedside',
+                [{'entity_id': 'light.alpha', 'domain': 'light'}], model='bslamp')
+            router, _, _ = make_router(config=config, manager=old.sn_manager)
+            self.assertIs(router.preserved_cards['light'], primary)
+            self.assertIn('switch', router.devices['fan'].product.services)
+            router.write('fan', 'switch', {'on': 1})
+            self.assertIn('switch', primary.product.services)
+            # 没有旧主卡时同样保留完整 profile 服务。
+            fresh, _, _ = make_router(config=config)
+            self.assertIn('switch', fresh.devices['fan'].product.services)
+
+    def test_primary_role_mismatch_and_unsafe_sharing_reject_without_mutation(self):
+        for wrong in ('primary_role', 'non_binary', 'side_effect'):
+            with self.subTest(wrong=wrong), tempfile.TemporaryDirectory() as directory:
+                config = Path(directory) / 'mapping'; shutil.copytree(FIXTURE, config)
+                path = config / 'compositions.json'; data = json.loads(path.read_text())
+                data['bundles']['fan_light'][0]['primary_role'] = 'ambient' if wrong == 'primary_role' else 'main'
+                if wrong == 'non_binary':
+                    data['bundles']['fan_light'][1]['share_when_primary_preserved'] = ['direction']
+                if wrong == 'side_effect':
+                    data['bundles']['fan_light'][1].update(
+                        services={'switch': {'role': 'main', 'domain': 'light', 'action': 'turn_on_off',
+                                             'options': {'power_on': {'attribute': 'brightness', 'maximum': 1, 'values': {'brightness': 100}}}}},
+                        share_when_primary_preserved=['switch'])
+                path.write_text(json.dumps(data))
+                old = legacy.ServiceRouter()
+                asyncio.run(old.load_product_registry(str(COMPONENT / 'config/product_registry.json')))
+                primary = old.register_device('alpha', 'fixture bedside',
+                    [{'entity_id': 'light.alpha', 'domain': 'light'}], model='bslamp')
+                with self.assertRaises(ValueError):
+                    make_router(config=config, manager=old.sn_manager)
+                self.assertEqual(old.sn_manager.get_device_count(), 1)
+                self.assertIs(old.sn_manager.get_by_sn(primary.sn), primary)
+
     def test_unified_catalog_preserves_normal_discovery_and_requires_explicit_composition_matching(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "capabilities"

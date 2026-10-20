@@ -93,6 +93,13 @@ async def exercise(phase, native_only=False):
             await options(hass, entry, 'openharmony')
             await wait_active(hass, entry, 'openharmony')
             await wait_native_status(False)
+        elif phase == 'failback':
+            current = await wait_active(hass, entry, 'openharmony')
+            current.process.kill()
+            current = await wait_active(hass, entry, 'legacy')
+            assert current.state['failed_backend'] == 'openharmony'
+            await check_offline()
+            result['real_legacy_failback_persisted_for_cold_HA_restart'] = True
         else:
             current = await wait_active(hass, entry, 'openharmony')
             assert fixture['states'][entity]['state'] == 'unavailable'
@@ -118,7 +125,7 @@ async def exercise(phase, native_only=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('phase', choices=['exercise', 'restart'])
+    parser.add_argument('phase', choices=['exercise', 'restart', 'failback'])
     parser.add_argument('--native-only', action='store_true',
         help='ARM 旧库未验真时只验证拒绝回退并停用，不绕过哈希检查')
     args = parser.parse_args()

@@ -13,6 +13,13 @@ products = load('product_registry')
 
 
 class GatewayIdentityTest(unittest.TestCase):
+    def test_offline_production_preparation_cannot_start_either_engine(self):
+        target = object.__new__(deployment.GatewayDeployment)
+        target.settings = {'offline_preparation': True}
+        for mode in ('legacy', 'openharmony'):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'offline production preparation'):
+                target.verify_engine(mode)
+
     def test_old_managed_native_directory_is_refused_before_executable_or_probe_access(self):
         target = object.__new__(deployment.GatewayDeployment)
         target.interface, target.settings = 'fixture0', {}

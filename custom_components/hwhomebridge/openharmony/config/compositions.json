@@ -33,7 +33,9 @@
       },
       {
         "key": "light",
-        "pid": "2KJ0"
+        "pid": "2KJ0",
+        "primary": true,
+        "primary_role": "main"
       },
       {
         "key": "aux",
@@ -236,7 +238,8 @@
       },
       {
         "key": "timer-controls",
-        "pid": "2NAL"
+        "pid": "2NAL",
+        "share_when_primary_preserved": ["switch"]
       }
     ]
   }
