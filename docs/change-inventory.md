@@ -12,9 +12,9 @@
 | 公共测试 | 15 | 1,926 | 0 | 公共映射、生命周期、隔离、实际 HA 业务链路 |
 | 文档 | 32 | 3,381 | 0 | 设计、安装、备份、维护、验收和贡献材料 |
 
-## 本轮增量与当前总范围
+## 准备阶段增量与当前总范围
 
-本轮另外新增 5 个文件、修改上述快照中 2 个文件，所以当前分支相对该上游基线共有 **227 个差异文件**：HA 组件 47、工具 39、实验及验证 90、公共测试 15、文档 36。干净贡献分支仍为 27 文件，没有把本轮实验工具混入第一批公共框架贡献。
+准备阶段的 `62fa74d` 另外新增 5 个文件、修改上述快照中 2 个文件，共有 227 个差异文件。随后实际 LAN 验收新增 1 份脱敏记录，并更新验收说明及本清单；当前相对上游基线共有 **228 个差异文件**：HA 组件 47、工具 39、实验及验证 90、公共测试 15、文档 37。干净贡献分支仍为 27 文件，没有把实验工具混入第一批公共框架贡献。
 
 | 状态 | 文件 | 内容 |
 | --- | --- | --- |
@@ -22,11 +22,12 @@
 | 新增 | [docs/app-direct-lan-acceptance.md](app-direct-lan-acceptance.md) | App LAN 的前置条件、实际边界和验收步骤 |
 | 新增 | [docs/plans/app-direct-lan-preparation-validation.json](plans/app-direct-lan-preparation-validation.json) | 独立 HA 重启、观察器修复及尚未通过的 App/LAN 项 |
 | 新增 | [docs/plans/change-inventory-classification.json](plans/change-inventory-classification.json) | Jev 模块分类及 Codex 复核记录 |
-| 新增 | [tools/ha_macos_lab_lan.sh](../tools/ha_macos_lab_lan.sh) | 临时 Mac 实验桥接脚本；管理员启动路径尚待现场验证 |
+| 新增 | [tools/ha_macos_lab_lan.sh](../tools/ha_macos_lab_lan.sh) | 临时 Mac 实验桥接脚本；管理员启动及实际 LAN 发现现已验证 |
 | 修改 | [experiments/openharmony_bridge/gateway_app_acceptance.py](../experiments/openharmony_bridge/gateway_app_acceptance.py) | 排除历史确认，记录启动轮次及本次 C 写入结果 |
 | 修改 | [docs/native-lan-confirmation-validation.md](native-lan-confirmation-validation.md) | 链接后续 App 直连进展，不改变旧轮次的验收结论 |
+| 后续新增 | [docs/plans/app-direct-lan-runtime-validation.json](plans/app-direct-lan-runtime-validation.json) | 物理 App 的 LAN 发现、首次控制失败、云端对照、实际 HA 重启和网络恢复断言 |
 
-新增 5 个文件加上后面的 222 文件清单，覆盖当前全部 227 个差异路径；历史未跟踪文件仍在文末单独列出。本轮提交属于观察器修复、实验网络准备和清单整理，不能当作 App 直连已经通过。
+新增 6 个文件加上后面的 222 文件清单，覆盖当前全部 228 个差异路径；历史未跟踪文件仍在文末单独列出。当前 App LAN **发现**已通过，LAN **服务控制**仍未通过。云端空场景控制和重启后首次关闭已通过；平板 IPv4 受限测试存在 IPv6 外网通道，未计为完全断网验收。这轮实测只更新文档和证据，没有修改 C 或 HA 运行代码。
 
 ## 已实现的能力
 
