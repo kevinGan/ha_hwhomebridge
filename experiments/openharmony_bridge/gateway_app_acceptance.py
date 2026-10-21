@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import time
+import uuid
 
 from gateway_ha_acceptance import (BASE, CONFIG, make_hass, options, runtime,
     save, snapshot, child_processes, wait_active)
@@ -15,15 +16,18 @@ async def main(expected_boot):
         'purpose': 'existing-gateway-ha-lifecycle-virtual-only', 'production_access': False}
     assert json.loads((BASE / 'gateway.local.json').read_text())['sn'].startswith('OHPOC-')
     initial = snapshot()
+    acceptance_run_id = uuid.uuid4().hex
     channel = CONFIG / 'app-acceptance'
     channel.mkdir(mode=0o700, exist_ok=True)
+    # 在启动 HA/SDK 前取起点，既排除旧确认，也保留启动期间的真实写入。
+    audit = CONFIG / 'fixture-service-calls.private.jsonl'
+    audit_offset = audit.stat().st_size if audit.exists() else 0
+    native_log = BASE / 'openharmony.private.log'
+    log_offset = native_log.stat().st_size if native_log.exists() else 0
     hass, entry = await make_hass()
     fixture = hass.data['hwhomebridge_virtual_fixture']
     roles = json.loads((BASE / 'instances.json').read_text())['devices'][0]['roles']
     assert all(entity.split('.')[1].startswith('oh_single_') for entity in fixture['states'])
-    audit = CONFIG / 'fixture-service-calls.private.jsonl'
-    audit_offset = audit.stat().st_size if audit.exists() else 0
-    log_offset = 0
     observations = []
     observation_offset = 0
     def observe_writes(current):
@@ -52,6 +56,7 @@ async def main(expected_boot):
                 stream.seek(audit_offset)
                 calls = [json.loads(line) for line in stream if line.strip()]
         writes = []
+        backend_results = []
         path = BASE / 'openharmony.private.log'
         if path.exists():
             with path.open() as stream:
@@ -65,14 +70,21 @@ async def main(expected_boot):
                         continue
                     if row.get('write_confirmed') is True:
                         writes.append({'key': row['key'], 'sid': row['sid']})
+                    if row.get('event') == 'backend_result' and row.get('operation') == 'write':
+                        backend_results.append({key: row[key] for key in (
+                            'request_id', 'operation', 'reason', 'error_type', 'errno', 'elapsed_ms')
+                            if key in row})
         legacy = BASE / 'legacy-status.json'
         legacy_status = json.loads(legacy.read_text()) if legacy.exists() else {}
-        return {'legacy_sdk_status': legacy_status, 'time': time.time(), 'backend': current.active if current else 'disabled',
+        return {'acceptance_run_id': acceptance_run_id,
+            'legacy_sdk_status': legacy_status, 'time': time.time(), 'backend': current.active if current else 'disabled',
             'native_owners': len(child_processes()), 'states': {entity: {
                 'state': hass.states.get(entity).state, 'attributes': dict(hass.states.get(entity).attributes)}
                 for entity in fixture['states']}, 'HA_service_calls_since_mark': calls,
             'loopback_write_observations': observations[observation_offset:],
-            'native_confirmed_writes_since_mark': writes, 'paired_files_unchanged': snapshot() == initial}
+            'native_confirmed_writes_since_mark': writes,
+            'native_backend_results_since_mark': backend_results,
+            'paired_files_unchanged': snapshot() == initial}
     try:
         current = await wait_active(hass, entry, expected_boot)
         observe_writes(current)
