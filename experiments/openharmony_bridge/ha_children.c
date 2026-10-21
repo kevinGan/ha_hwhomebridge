@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "cJSON.h"
@@ -172,8 +173,71 @@ int PocHaInit(const char *parent_sn, bool enabled) {
 }
 bool PocHaEnabled(void) { return child_count > 0; }
 bool PocHaMatches(const char *device_id) { return find_child(device_id) != NULL; }
+/* 不记录载荷或身份；请求号只在本进程内递增，用于和回环服务日志对照。 */
+struct BackendTrace {
+    unsigned long id;
+    struct timespec started;
+    const char *reason;
+    int system_error;
+};
+static unsigned long backend_sequence;
+/* 回环服务总是返回 Content-Length。读满一帧即可结束，不能等连接关闭来确认。 */
+static int backend_frame_size(char *response, size_t size, size_t capacity, size_t *total) {
+    response[size] = 0;
+    char *end = strstr(response, "\r\n\r\n");
+    if (!end) return 0;
+    char *line = strstr(response, "\r\n");
+    if (!line || strncmp(response, "HTTP/1.0 200 ", 13)) return -1;
+    bool found = false;
+    size_t length = 0;
+    for (line += 2; line < end; ) {
+        char *next = strstr(line, "\r\n");
+        if (!next || next > end) return -1;
+        if (!strncasecmp(line, "Transfer-Encoding:", 18)) return -1;
+        if (!strncasecmp(line, "Content-Length:", 15)) {
+            if (found) return -1;
+            found = true;
+            char *value = line + 15;
+            while (value < next && (*value == ' ' || *value == '\t')) ++value;
+            if (value == next) return -1;
+            for (; value < next; ++value) {
+                if (*value < '0' || *value > '9' || length > capacity / 10) return -1;
+                length = length * 10 + (size_t)(*value - '0');
+                if (length >= capacity) return -1;
+            }
+        }
+        line = next + 2;
+    }
+    size_t header = (size_t)(end + 4 - response);
+    if (!found || !length || length >= capacity - header) return -1;
+    *total = header + length;
+    return 1;
+}
+static void backend_trace(const char *sid, const struct BackendTrace *trace, const cJSON *json) {
+    if (!sid && (!trace->reason || cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "available")))) return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed = (now.tv_sec - trace->started.tv_sec) * 1000 +
+        (now.tv_nsec - trace->started.tv_nsec) / 1000000;
+    const char *error = string_field(json, "error");
+    const char *safe_error = "none";
+    const char *allowed[] = {"TimeoutError", "SourceUnavailable", "ValueError", "RuntimeError", "KeyError", "OSError"};
+    if (error) {
+        safe_error = "BackendError";
+        for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); ++i)
+            if (!strcmp(error, allowed[i])) safe_error = allowed[i];
+    }
+    printf("HA {\"event\":\"backend_result\",\"request_id\":%lu,\"operation\":\"%s\","
+        "\"reason\":\"%s\",\"error_type\":\"%s\",\"errno\":%d,\"elapsed_ms\":%ld}\n",
+        trace->id, sid ? "write" : "read", trace->reason ? trace->reason : "accepted",
+        safe_error, trace->system_error, elapsed);
+    fflush(stdout);
+}
 /* Linux loopback backend; the standalone deployment connects directly to HA. */
-static cJSON *backend_request(const char *sid, const cJSON *value) {
+static cJSON *backend_request(const char *sid, const cJSON *value, struct BackendTrace *trace) {
+    trace->id = ++backend_sequence;
+    clock_gettime(CLOCK_MONOTONIC, &trace->started);
+    trace->reason = "request_build_failed";
     cJSON *request = cJSON_CreateObject();
     if (!request) return NULL;
     cJSON_AddStringToObject(request, "key", ha_child.key);
@@ -194,31 +258,44 @@ static cJSON *backend_request(const char *sid, const cJSON *value) {
     struct timeval timeout = {.tv_sec=12};
     struct sockaddr_in address = {.sin_family=AF_INET, .sin_port=htons(port), .sin_addr.s_addr=htonl(INADDR_LOOPBACK)};
     char message[10000];
-    int length = snprintf(message, sizeof(message), "POST /bridge HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s", strlen(body), body);
+    int length = snprintf(message, sizeof(message), "POST /bridge HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nX-HWHB-Request-Id: %lu\r\nContent-Length: %zu\r\n\r\n%s", trace->id, strlen(body), body);
     free(body);
     if (fd < 0 || length < 0 || (size_t)length >= sizeof(message)) { if(fd >= 0) close(fd); return NULL; }
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    if (connect(fd, (struct sockaddr *)&address, sizeof(address))) {close(fd); return NULL;}
+    if (connect(fd, (struct sockaddr *)&address, sizeof(address))) {
+        trace->reason = "connect_failed"; trace->system_error = errno; close(fd); return NULL;
+    }
     size_t sent = 0;
     while (sent < (size_t)length) {
         ssize_t n = send(fd, message + sent, (size_t)length - sent, MSG_NOSIGNAL);
         if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) {close(fd); return NULL;}
+        if (n <= 0) {trace->reason = "send_failed"; trace->system_error = errno; close(fd); return NULL;}
         sent += (size_t)n;
     }
-    char response[16385]; size_t pos = 0;
+    char response[16385]; size_t pos = 0, expected = 0;
     while (pos < sizeof(response)-1) {
         ssize_t n = read(fd, response+pos, sizeof(response)-1-pos);
         if (n < 0 && errno == EINTR) continue;
-        if (n < 0) {close(fd); return NULL;}
+        if (n < 0) {
+            trace->reason = errno == EAGAIN || errno == EWOULDBLOCK ? "receive_timeout" : "receive_failed";
+            trace->system_error = errno; close(fd); return NULL;
+        }
         if (!n) break;
         pos += (size_t)n;
+        int framed = backend_frame_size(response, pos, sizeof(response), &expected);
+        if (framed < 0 || (framed && pos > expected)) {
+            trace->reason = "invalid_http"; close(fd); return NULL;
+        }
+        if (framed && pos == expected) break;
     }
     close(fd); response[pos] = 0;
+    trace->reason = "truncated_http";
+    if (!expected || pos != expected) return NULL;
     char *payload = strstr(response, "\r\n\r\n");
     if (!payload || strncmp(response, "HTTP/1.0 200 ", 13)) return NULL;
     cJSON *json = cJSON_ParseWithOpts(payload+4, NULL, true);
+    trace->reason = json ? NULL : "invalid_json";
     return json;
 }
 static void source_state(bool available) {
@@ -229,10 +306,13 @@ static void source_state(bool available) {
     }
 }
 static cJSON *ha_request(const char *sid, const cJSON *value) {
-    cJSON *json = backend_request(sid, value);
+    struct BackendTrace trace = {0};
+    cJSON *json = backend_request(sid, value, &trace);
     const cJSON *state = cJSON_GetObjectItemCaseSensitive(json, "state");
     bool available = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json, "ok")) &&
         !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "available")) && cJSON_IsObject(state);
+    if (json && !available) trace.reason = "backend_rejected";
+    backend_trace(sid, &trace, json);
     /* 普通写入校验失败不等于设备离线；读取失败和传输中断必须清掉旧状态。 */
     if (available || !sid || !json || cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(json, "available")))
         source_state(available);

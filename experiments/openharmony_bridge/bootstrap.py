@@ -94,6 +94,14 @@ for name, item in json.loads((ROOT / "sources.lock.json").read_text()).items():
         changed = text.replace("mkdir(dir, 0660)", "mkdir(dir, 0700)")
         if changed != text:
             path.write_text(changed)
+        # 本地控协商会派生会话密钥；上游 INFO 日志不能输出这个值。
+        path = destination / "core/wifi/application/local_control/local_ctl_coap_api.c"
+        text = path.read_text()
+        old = '    IOTC_LOGI("%s localCtlKey:[%s]", __func__, localCtlKeyStr);'
+        new = '    /* POC_LOCAL_KEY_REDACTED: never log derived session keys. */'
+        if old not in text and new not in text:
+            raise SystemExit("本地会话密钥日志补丁上下文不匹配")
+        path.write_text(text.replace(old, new))
         # App 实测请求 cloudSetup；仅兼容实验构建启用别名，不改变上游默认入口。
         path = destination / "core/wifi/application/lan_search/lan_search_coap_stack.c"
         text = path.read_text()

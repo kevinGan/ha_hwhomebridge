@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -12,6 +13,8 @@ from pathlib import Path
 from .configuration import integer, unique_object
 from ..availability import SourceUnavailable
 from ..ha_transport import ScopedTransport, HomeAssistantTransport
+
+_LOGGER = logging.getLogger(__name__)
 
 
 
@@ -63,6 +66,12 @@ def make_server(router, port, read_only=False):
             pass
 
         def do_POST(self):
+            started = time.monotonic()
+            queued = entered = started
+            operation, phase = "unknown", "decode"
+            request_id = self.headers.get("X-HWHB-Request-Id", "0")
+            if not request_id.isascii() or not request_id.isdecimal() or len(request_id) > 20:
+                request_id = "0"
             try:
                 if self.path != "/bridge":
                     raise ValueError("unknown endpoint")
@@ -73,13 +82,26 @@ def make_server(router, port, read_only=False):
                     raise ValueError("invalid request fields")
                 if read_only and "data" in request:
                     raise ValueError("read-only backend")
+                operation = "write" if "data" in request else "read"
+                phase = "dispatch"
+                queued = time.monotonic()
                 with lock:
+                    entered = time.monotonic()
                     state = router.write(request["key"], request["sid"], request["data"]) if "data" in request else router.snapshot(request["key"])
                 response = {"ok": True, "available": True, "state": state}
             except SourceUnavailable:
                 response = {"ok": False, "available": False, "error": "SourceUnavailable"}
             except Exception as error:
                 response = {"ok": False, "error": type(error).__name__}
+            if operation == "write" or not response["ok"] and response.get("error") != "SourceUnavailable":
+                log = _LOGGER.info if response["ok"] else _LOGGER.warning
+                log("bridge_result %s", json.dumps({
+                    "request_id": request_id, "operation": operation,
+                    "phase": phase, "ok": response["ok"],
+                    "error_type": response.get("error", "none"),
+                    "queue_ms": round((entered - queued) * 1000),
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                }, separators=(",", ":")))
             payload = json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(payload)))

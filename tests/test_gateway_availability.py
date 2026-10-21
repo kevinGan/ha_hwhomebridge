@@ -89,6 +89,33 @@ class GatewayAvailabilityTests(unittest.TestCase):
         finally:
             server.shutdown(); server.server_close(); thread.join(timeout=3)
 
+    def test_unconfirmed_write_is_not_replayed_and_diagnostics_do_not_log_payload(self):
+        actual = {'switch': {'on': 0}}
+        def applied_but_unconfirmed(key, sid, data):
+            actual[sid] = data
+            raise TimeoutError('private-payload-sentinel')
+        router = SimpleNamespace(write=Mock(side_effect=applied_but_unconfirmed))
+        server = transport.make_server(router, 0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            request = urllib.request.Request('http://127.0.0.1:%d/bridge' % server.server_port,
+                data=b'{"key":"private-card-sentinel","sid":"switch","data":{"on":1}}',
+                headers={'Content-Type': 'application/json', 'X-HWHB-Request-Id': '17'})
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with self.assertLogs(transport._LOGGER, level='WARNING') as captured:
+                with opener.open(request, timeout=3) as response:
+                    self.assertEqual(json.load(response), {'ok': False, 'error': 'TimeoutError'})
+            self.assertEqual(actual['switch'], {'on': 1})
+            self.assertEqual(router.write.call_count, 1)
+            line = captured.records[0].getMessage()
+            report = json.loads(line.split('bridge_result ', 1)[1])
+            self.assertEqual((report['request_id'], report['error_type']), ('17', 'TimeoutError'))
+            self.assertNotIn('sentinel', line)
+            self.assertNotIn('data', report)
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=3)
+
     def test_startup_skips_only_typed_source_outage(self):
         for error in (availability.SourceUnavailable(), ValueError('profile mismatch')):
             with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
