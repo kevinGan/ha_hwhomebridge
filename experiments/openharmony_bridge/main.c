@@ -1,5 +1,6 @@
 /* 独立实验 SDK 网关；HA 子设备仅在显式开启第二阶段配置后接入。 */
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -253,7 +254,9 @@ static int load_config(const char *path, bool live) {
 /* 启动任何SDK任务前，用同目录的原生离线探针确认已有根身份。 */
 static int verify_bound(const char *executable, const char *gateway) {
     if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(config, "preserve_bound_identity"))) return 0;
-    char probe[PATH_MAX];
+    char probe[PATH_MAX], store[PATH_MAX];
+    /* 管理层的活动目录共享原 KV；探针仍只接收真实目录并检查私有权限。 */
+    if (!realpath("sdk-state", store)) return -1;
     if (strlen(executable) + 32 >= sizeof(probe)) return -1;
     strcpy(probe, executable);
     char *slash = strrchr(probe, '/');
@@ -268,7 +271,7 @@ static int verify_bound(const char *executable, const char *gateway) {
         close(descriptors[0]);
         if (dup2(descriptors[1], STDOUT_FILENO) < 0) _exit(127);
         close(descriptors[1]);
-        execl(probe, probe, "sdk-state", gateway, (char *)NULL);
+        execl(probe, probe, store, gateway, (char *)NULL);
         _exit(127);
     }
     close(descriptors[1]);

@@ -46,19 +46,26 @@ class GatewayLifecycle:
                     or self.state.get('active') not in ('disabled', 'legacy', 'openharmony')):
                 raise ValueError('lifecycle journal belongs to a different gateway')
 
-    async def start(self, desired, revision):
+    async def start(self, desired, revision, management=None):
         fd = os.open(self.deployment.directory / 'engine-owner.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         self.owner = os.fdopen(fd, 'a')
         try:
             fcntl.flock(self.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            self.router = await GatewayRouter.create(self.hass, self.deployment, self.entry_id)
+            if management is None:
+                self.router = await GatewayRouter.create(self.hass, self.deployment, self.entry_id)
+            else:
+                self.router = await GatewayRouter.create(self.hass, self.deployment, self.entry_id, management)
+            if management is not None:
+                from .gateway_management import prepare_runtime
+                self.worker_runtime = await self.hass.async_add_executor_job(prepare_runtime,
+                    self.deployment, self.router.catalog)
             retry = revision != self.state.get('revision')
             interrupted = self.state.get('pending')
             failed = self.state.get('failed_backend') or (interrupted or {}).get('to')
             if not retry and failed:
                 desired = (self.state.get('last_good') or 'disabled') if interrupted or self.state['active'] != 'disabled' else 'disabled'
             if desired != 'disabled':
-                for row in self.deployment.catalog:
+                for row in getattr(self.router, 'catalog', self.deployment.catalog):
                     try:
                         await self.hass.async_add_executor_job(self.router.snapshot, row['key'])
                     except SourceUnavailable:
@@ -131,7 +138,8 @@ class GatewayLifecycle:
         (spec.directory / 'legacy-status.json').unlink(missing_ok=True)
         self.process = await asyncio.create_subprocess_exec(sys.executable,
             str(Path(__file__).with_name('gateway_worker.py')), mode, str(spec.directory),
-            env={**os.environ, 'HWHB_PARENT_PID': str(os.getpid()), 'HWHB_LEGACY_LIBRARY': str(spec.legacy_library)},
+            env={**os.environ, 'HWHB_PARENT_PID': str(os.getpid()), 'HWHB_LEGACY_LIBRARY': str(spec.legacy_library),
+                 'HWHB_ACTIVE_RUNTIME': str(getattr(self, 'worker_runtime', spec.runtime))},
             pass_fds=(self.owner.fileno(),), stdin=asyncio.subprocess.DEVNULL, stdout=self.log, stderr=self.log)
         timeout = spec.settings.get('startup_timeout', 45)
         if type(timeout) is not int or not 5 <= timeout <= 120:
@@ -169,7 +177,8 @@ class GatewayLifecycle:
                             children_synced.add(response['key'])
                 except (ValueError, KeyError):
                     continue
-        return parent_online and {row['key'] for row in spec.catalog} <= children_synced
+        catalog = getattr(getattr(self, 'router', None), 'catalog', spec.catalog)
+        return parent_online and {row['key'] for row in catalog} <= children_synced
 
     async def _watch(self, process, mode):
         await process.wait()

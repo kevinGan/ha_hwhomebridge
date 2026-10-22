@@ -27,6 +27,7 @@ from .const import (DOMAIN, CONF_BACKEND, CONF_OH_DIRECTORY, BACKEND_LEGACY,
                     BACKEND_OPENHARMONY, BACKEND_DISABLED, CONF_BACKEND_TYPE, CONF_GATEWAY_DIRECTORY, CONF_GATEWAY_REVISION,
                     configured_backend, backend_type, legacy_entry_id, managed_directory)
 from .pin_manager import PINManager
+from .gateway_management_flow import GatewayManagementFlow
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
 
-class OptionsFlowHandler(config_entries.OptionsFlow):
+class OptionsFlowHandler(GatewayManagementFlow, config_entries.OptionsFlow):
     """选项配置流程处理器
     
     已配置后，点击"配置"按钮进入此流程。
@@ -184,15 +185,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     return self.async_abort(reason="legacy_only")
                 return await self.async_step_pin_binding()
             elif action == "device_management":
+                if managed_directory(self.config_entry):
+                    return await self.async_step_managed_devices()
                 if configured_backend(self.config_entry) != BACKEND_LEGACY or managed_directory(self.config_entry):
                     return self.async_abort(reason="legacy_only")
                 return await self.async_step_select_device()
+            elif action == 'role_binding' and managed_directory(self.config_entry):
+                return await self.async_step_managed_role_device()
 
         actions = {"backend": "桥接后端 / 启用与回退"}
         if backend_type(self.config_entry) == BACKEND_LEGACY:
             actions["gateway_lifecycle"] = "接管当前网关 / 后端切换"
         if configured_backend(self.config_entry) == BACKEND_LEGACY and not managed_directory(self.config_entry):
             actions = {"pin_binding": "PIN绑定", "device_management": "设备管理", **actions}
+        elif managed_directory(self.config_entry):
+            actions = {'device_management': '设备管理', 'role_binding': '角色绑定与功能卡片', **actions}
         
         # 显示选择菜单
         return self.async_show_form(

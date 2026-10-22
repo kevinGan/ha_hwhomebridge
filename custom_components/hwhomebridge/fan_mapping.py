@@ -58,6 +58,11 @@ def validate_fan_mapping(mapping):
     if "unmapped" in mapping.options:
         if _integer(mapping.options["unmapped"]) < 0:
             raise ValueError("unmapped fan enum must be nonnegative")
+    if mapping.options.get('binary_choice'):
+        if (expected_attr != 'percentage' or set(vm.mapping_dict) != {'0', '1'}
+                or vm.mapping_dict['0'] != 0 or vm.mapping_dict['1'] <= 0
+                or mapping.options.get('unmapped') != 0):
+            raise ValueError('binary fan choice requires stop and one positive percentage')
 
 
 def fan_command(mapping, value):
@@ -84,6 +89,8 @@ def fan_state(mapping, state, attributes):
         raise ValueError("explicit fan mapping required")
     if state not in ("on", "off"):
         return None
+    if mapping.options.get('binary_choice') and state == 'off':
+        return 0
     value = (attributes or {}).get(mapping.value_attr)
     if value is None or isinstance(value, bool):
         return None

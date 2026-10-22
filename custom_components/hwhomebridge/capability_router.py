@@ -43,7 +43,7 @@ class CapabilityRouter(ServiceRouter):
         if sn_manager is not None:
             self.sn_manager = sn_manager
         await self.registry.load_configuration(configuration)
-        if instances.get("version") != 1 or not instances.get("devices"):
+        if instances.get("version") != 1 or not isinstance(instances.get("devices"), list):
             raise ValueError("invalid instance configuration")
         parent = instances["parent_sn"]
         if getattr(self.sn_manager, "capability_parent_identity", parent) != parent:
@@ -62,6 +62,9 @@ class CapabilityRouter(ServiceRouter):
             product, _ = self.matcher.match_with_detail(info, include_compositions=True)
             if not product:
                 raise ValueError("device has no configured composition")
+            if source.get('layout', 'original') != 'original':
+                from .card_layouts import apply_layout
+                product = apply_layout(self.registry, product, source['layout'])
             planned, preserved, bindings = plan_composition(
                 self.registry, self.sn_manager, product, source, parent,
                 owned_entities[source["id"]], supported_pids, sn_factory)
@@ -199,6 +202,10 @@ class CapabilityRouter(ServiceRouter):
         elif action == "set_color_temp":
             self.transport.call(domain, "turn_on", entity, color_temp_kelvin=value)
         elif action in ("set_speed", "set_fan_mode", "set_direction"):
+            if options.get('binary_choice') and not value:
+                current = self.transport.states()[entity]
+                if fan_state(mapping, current['state'], current['attributes']) != 1:
+                    return
             service, values = fan_command(mapping, value)
             self.transport.call(domain, service, entity, **values)
         elif action == "set_effect":

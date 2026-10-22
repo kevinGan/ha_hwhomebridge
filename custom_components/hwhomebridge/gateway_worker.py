@@ -25,11 +25,14 @@ def main(mode, directory):
         raise RuntimeError('Linux parent supervision required')
     settings = json.loads((directory / 'deployment.json').read_text())
     root = json.loads((directory / 'gateway.local.json').read_text())
+    active = Path(os.environ.get('HWHB_ACTIVE_RUNTIME', str(directory / 'runtime')))
+    if active not in (directory / 'runtime', directory / 'runtime/managed') or active.is_symlink():
+        raise ValueError('owned gateway runtime required')
     environment = {**os.environ, 'POC_INTERFACE': settings['interface'], 'POC_CLOUD_STATUS': '1',
         'POC_HA_PROXY_PORT': str(settings['port']), 'POC_LAN_PORT': str(settings['lan_port'])}
     if mode == 'openharmony':
         binary = directory / 'bridge_poc'
-        os.execve(binary, [str(binary), str(directory / 'runtime'), '--live', str(directory / 'gateway.local.json')], environment)
+        os.execve(binary, [str(binary), str(active), '--live', str(directory / 'gateway.local.json')], environment)
     os.environ['HILINK_CONFIG_DIR'] = str(directory / 'legacy') + '/'
     os.chdir(directory / 'legacy')
     library = C.CDLL(os.environ['HWHB_LEGACY_LIBRARY'])
@@ -45,7 +48,7 @@ def main(mode, directory):
     ac_buffer = (C.c_ubyte * 48).from_buffer_copy(ac)
     if library.HILINK_SetAutoAc(ac_buffer, 48):
         raise ValueError('legacy AC setup failed')
-    catalog = [row for row in json.loads((directory / 'runtime/ha-children.local.json').read_text()) if 'sdk_index' in row]
+    catalog = [row for row in json.loads((active / 'ha-children.local.json').read_text()) if 'sdk_index' in row]
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     def bridge(key, sid=None, data=None):
         payload = {'key': key}

@@ -61,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     runtime = GatewayLifecycle(hass, spec, entry.entry_id)
                     runtime.relative_directory = managed
                     await runtime.start(mode, entry.options.get(CONF_GATEWAY_REVISION,
-                        entry.data.get(CONF_GATEWAY_REVISION, 'initial')))
+                        entry.data.get(CONF_GATEWAY_REVISION, 'initial')), entry.options.get('gateway_devices'))
                     mode = runtime.active
                     for device in runtime.router.manager.get_all_devices():
                         source = dr.async_get(hass).async_get(device.ha_device_id)

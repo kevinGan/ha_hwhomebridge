@@ -127,7 +127,14 @@ def plan_composition(registry, sn_manager, product, source, parent_identity,
         raise ValueError("existing primary does not belong to supplied device inventory")
     preserving_primary = existing is not None and any(card.get("primary") for card in registry.bundles[product.composition])
     preserved, devices = {}, {}
-    for card in registry.bundles[product.composition]:
+    cards = registry.bundles[product.composition]
+    selected = source.get('cards')
+    if selected is not None:
+        if (not isinstance(selected, list) or not selected or len(set(selected)) != len(selected)
+                or set(selected) - {card['key'] for card in cards}):
+            raise ValueError('select declared composition cards')
+        cards = [card for card in cards if card['key'] in selected]
+    for card in cards:
         key = prefix + card["key"]
         if card.get("primary") and existing is not None:
             role = card.get("primary_role")

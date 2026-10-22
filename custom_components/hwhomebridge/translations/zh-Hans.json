@@ -74,6 +74,60 @@
           "gateway_directory": "现有网关资料目录",
           "backend": "桥接引擎"
         }
+      },
+      "managed_devices": {
+        "title": "设备管理",
+        "description": "从当前 HA 设备中选择要桥接的设备，共 {device_count} 个候选。\n\n取消勾选会停用桥接并保留已配对子卡，不关闭家里的实体。新增设备需继续绑定角色。所有设备共用原来的一个网关。",
+        "data": {
+          "devices": "启用桥接的设备"
+        }
+      },
+      "managed_role_device": {
+        "title": "角色绑定与功能卡片",
+        "description": "选择要调整的设备。原主灯的身份和绑定保持不变；尚未添加的设备请先进入设备管理。",
+        "data": {
+          "device": "设备"
+        }
+      },
+      "managed_layout": {
+        "title": "选择风扇卡片布局",
+        "description": "六档开关卡用两张四键卡显示六档、自然风和电源，避免原风扇模板的七／八档、摇头按钮。切换布局不会创建新网关；已经配对的旧卡会停用保留，可在智慧生活手动删除。",
+        "data": {
+          "layout": "风扇布局"
+        }
+      },
+      "managed_cards": {
+        "title": "选择需要的功能卡片",
+        "description": "只选择需要的功能。原主灯继续保留。完整定时卡能调节原生定时，但它的厂商页面仍有未映射入口；取消选择会停用相应能力。",
+        "data": {
+          "cards": "功能卡片"
+        }
+      },
+      "managed_roles": {
+        "title": "绑定 HA 实体",
+        "description": "每个角色选择同一 HA 设备下的一个实体。不能重复使用实体或跨设备绑定，原主灯绑定不可替换。这里保存绑定，不会试开灯或试转风扇。",
+        "data": {
+          "fan": "风扇",
+          "main": "主灯",
+          "ambient": "氛围灯",
+          "flex": "凌动开关",
+          "sleep": "助眠模式",
+          "wake": "唤醒模式",
+          "default_on": "默认上电状态",
+          "fan_timer_enable": "风扇定时开关",
+          "fan_timer_duration": "风扇定时时长",
+          "fan_timer_remaining": "风扇定时剩余时间",
+          "light_timer_enable": "灯光定时开关",
+          "light_timer_duration": "灯光定时时长",
+          "light_timer_remaining": "灯光定时剩余时间"
+        }
+      },
+      "managed_confirm": {
+        "title": "确认设备管理配置",
+        "description": "启用 {device_count} 个来源设备，原网关共管理 {card_count} 张活动或保留子卡。\n\n{notes}\n\n停用保留身份和智慧生活卡片；保存会重载当前集成并沿用当前引擎选择和网关身份，不改变家中设备的开关状态。",
+        "data": {
+          "confirm": "确认保存并应用"
+        }
       }
     },
     "progress": {
@@ -84,11 +138,21 @@
       "internal_error": "内部错误，请重试",
       "integration_not_init": "集成正在启动中，请稍后再试",
       "invalid_backend": "未知后端，请重新选择。",
-      "legacy_only": "此功能仅适用于旧 HiLink 后端。"
+      "legacy_only": "此功能仅适用于旧 HiLink 后端。",
+      "no_managed_roles": "没有可编辑角色的新增设备，请先进入设备管理。",
+      "invalid_managed_device": "设备选择无效，请重新打开配置。",
+      "managed_source_unavailable": "来源设备已删除或禁用，请先恢复来源或在设备管理中停用。",
+      "managed_update_required": "请先使用当前原生构建重新准备网关目录，再启用设备管理；原配置和引擎保持不变。"
     },
     "error": {
       "invalid_openharmony_directory": "请检查独立目录、权限、程序与 profile 哈希、重复网关/目录及端口。",
-      "invalid_gateway_directory": "检查原条目、网关身份、子设备目录、权限及原生程序；不会创建新身份。"
+      "invalid_gateway_directory": "检查原条目、网关身份、子设备目录、权限及原生程序；不会创建新身份。",
+      "invalid_managed_devices": "请选择列表中的设备。",
+      "invalid_managed_cards": "请至少选择一张已支持的功能卡。",
+      "invalid_managed_roles": "请选择同一设备下不同的实体，不能替换原主灯。标准灯需支持亮度和色温，风扇需回报所选能力的状态，灯效需在设备支持列表中。",
+      "managed_role_missing": "当前设备缺少所需角色的实体；请返回减少功能卡片，或先修复 HA 设备实体。",
+      "managed_confirm_required": "请勾选确认后再保存。",
+      "invalid_managed_plan": "配置未保存。请检查角色、已安装产品资料及原主灯绑定；若其他页面已更新配置，请重新打开设备管理。"
     }
   },
   "notify": {
