@@ -7,7 +7,7 @@ import re
 from unittest.mock import patch
 
 
-def main(base, checksum, action, iteration):
+def main(base, checksum, action, iteration, package=None, container='hwhomebridge-ha-lifecycle'):
     if iteration and not re.fullmatch('[a-z0-9-]+',iteration):
         raise ValueError('simple private iteration name required')
     suffix = '-' + iteration if iteration else ''
@@ -17,8 +17,7 @@ def main(base, checksum, action, iteration):
     spec = importlib.util.spec_from_file_location('upgrade', base / 'tools/ha_upgrade.py')
     upgrade = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(upgrade)
-    container = 'hwhomebridge-ha-lifecycle'
-    package = base / 'tools/hwhomebridge-1.1.0b5.zip'
+    package = package or base / 'tools/hwhomebridge-1.1.0b5.zip'
     probe = base / 'tools/ha_runtime_preflight.py'
     component = config / upgrade.COMPONENT
     entries = config / '.storage/core.config_entries'
@@ -66,5 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('checksum')
     parser.add_argument('action',choices=['install','restore'])
     parser.add_argument('--iteration',default='')
+    parser.add_argument('--package',type=Path)
+    parser.add_argument('--container',default='hwhomebridge-ha-lifecycle')
     args = parser.parse_args()
-    main(args.base,args.checksum,args.action,args.iteration)
+    main(args.base,args.checksum,args.action,args.iteration,args.package,args.container)

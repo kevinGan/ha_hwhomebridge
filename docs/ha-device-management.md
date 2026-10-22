@@ -42,7 +42,7 @@
 
 `tools/ha_gateway_prepare.py` 现在产生 `managed_catalog_protocol: 1`。旧目录没有该声明时，设备管理入口会提示先更新资料，不保存管理配置。C 启动代码支持共享 KV 目录，在任何 SDK 网络启动前继续校验根身份。安装预检和运行预览共用 profile 校验，防止产品、服务类型、特性和范围不一致。
 
-生产目录继续保持 `offline_preparation: true`，本轮不解除该保护。现有 b8 安装包没有此次界面和 C 修改，不能直接使用它验收本轮功能；后续需要重打包、重新准备目录并单独安排安装验收。
+生产目录继续保持 `offline_preparation: true`，本轮不解除该保护。后续已将当前界面和 C 修改打入 b9 保留式升级包，并完成独立安装、重复升级和 b8 回退；见 [b9 验证记录](b9-package-and-app-acceptance.md)。智慧生活新布局仍待物理 App 验收，生产目录和接管保护保持不变。
 
 ## 本轮验证
 
