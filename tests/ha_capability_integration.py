@@ -124,7 +124,7 @@ async def exercise(directory):
     # 旧灯仍经过原ServiceActionDispatcher；不用组合卡重新注册或改PID。
     assert rebuilt.route_action(primary.sn, {"brightness": 50})
     await hass.async_block_till_done()
-    assert hass.states.get(roles["main"]).attributes["brightness"] == 127
+    assert hass.states.get(roles["main"]).attributes["brightness"] == 128
     assert json.loads(rebuilt.get_char_state(primary.sn, "cct")) == {"colorTemperature": 4000}
     result = {"passed": True, "real_HA_state_services_and_entity_registry": True,
               "fake_physical_devices": True, "registered_gateways": 0,

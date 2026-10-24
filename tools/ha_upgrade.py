@@ -19,8 +19,8 @@ import zipfile
 
 COMPONENT = Path("custom_components/hwhomebridge")
 PRESERVE = ("config/", "hilink_bridge/", "profile/")
-VERSION = "1.1.0b9"
-TESTED_HA = "2026.10.1"
+VERSION = "1.1.0b11"
+TESTED_HA = "2026.10.2"
 MAX_BYTES = 128 * 1024 * 1024
 CONTAINER_ENGINE = "podman"
 

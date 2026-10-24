@@ -11,6 +11,7 @@ Service Action Dispatcher - 服务操作分发
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -262,7 +263,8 @@ class ServiceActionDispatcher:
 
         # 根据 brightness_range 做缩放
         brightness_range = mapping.brightness_range or 255
-        br = int(br * 255 / brightness_range)
+        # HA/厂商再次将 0–255 换成整数百分比时会截断；向上取整避免连续丢档。
+        br = math.ceil(br * 255 / brightness_range)
         br = min(br, 255)
 
         self._call_service_async(

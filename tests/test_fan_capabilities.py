@@ -190,7 +190,7 @@ class FanCapabilityTests(unittest.TestCase):
         self.assertEqual(dispatcher.calls[-1][-1], {"percentage": 40})
         self.assertFalse(fans.is_mapped_fan(config))
 
-    def test_original_light_commands_and_reads_are_unchanged(self):
+    def test_original_light_commands_keep_entities_and_percent_scale(self):
         router = routers.ServiceRouter()
         self.assertTrue(asyncio.run(router.load_product_registry(str(COMPONENT / "config/product_registry.json"))))
         vd = router.register_device("fixture-light", "fixture bulb", [{"entity_id": "light.fixture", "domain": "light"}], model="bslamp")
@@ -200,7 +200,7 @@ class FanCapabilityTests(unittest.TestCase):
             self.assertTrue(router.route_action(vd.sn, payload))
         self.assertEqual(dispatcher.calls, [
             ("light", "turn_on", "light.fixture", {}),
-            ("light", "turn_on", "light.fixture", {"brightness": 127}),
+            ("light", "turn_on", "light.fixture", {"brightness": 128}),
             ("light", "turn_on", "light.fixture", {"color_temp_kelvin": 4000}),
         ])
         state = SimpleNamespace(state="on", attributes={"brightness": 255, "color_temp_kelvin": 4000})
@@ -208,6 +208,19 @@ class FanCapabilityTests(unittest.TestCase):
             result = router._build_char_state_json(sid, vd.product.services[sid], state, "light.fixture", vd)
             self.assertEqual(json.loads(result), expected)
         self.assertEqual(vd.sn, devices.SNManager.generate_sn("fixture-light"))
+
+    def test_light_percent_survives_vendor_integer_quantization(self):
+        dispatcher = RecordingDispatcher()
+        mapping = models.HAMapping(domain="light", action="set_brightness", brightness_range=100)
+        for percent in range(1, 101):
+            self.assertTrue(dispatcher.dispatch("fixture", "light.fixture", mapping, {"brightness": percent}))
+            ha_brightness = dispatcher.calls[-1][-1]["brightness"]
+            # 小米设备把 HA 亮度换回整数百分比；45% 原先被截成44%，上报再降为43%。
+            device_percent = int(ha_brightness * 100 / 255)
+            reported_ha = round(device_percent * 255 / 100)
+            reported_percent = int(reported_ha * 100 / 255)
+            self.assertEqual(device_percent, percent)
+            self.assertLessEqual(abs(reported_percent - percent), 1)
 
     def test_all_legacy_product_matches_and_fan_light_coexistence_keep_old_pid(self):
         registry = models.ProductRegistry()

@@ -30,7 +30,7 @@ class GatewayPrepareTest(unittest.TestCase):
         roles.write_text(json.dumps({'version': 1, 'devices': [{'id': 'virtual-light-source',
             'model': 'fixture-light', 'roles': {'main': 'light.fixture'}}]})); roles.chmod(0o600)
         snapshot = self.root / 'fresh.json'
-        snapshot.write_text(json.dumps({**self.data, 'ha_version': '2026.10.1'})); snapshot.chmod(0o600)
+        snapshot.write_text(json.dumps({**self.data, 'ha_version': preparing.TESTED_HA})); snapshot.chmod(0o600)
         ca = self.root / 'ca.pem'; ca.write_text('synthetic CA fixture')
         native = self.root / 'native'; native.mkdir()
         return {'cold': self.out, 'frozen': self.frozen, 'profiles': self.profiles, 'endpoint': self.endpoint,

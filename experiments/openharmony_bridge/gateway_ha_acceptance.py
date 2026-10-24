@@ -122,11 +122,14 @@ def snapshot():
 
 
 def child_processes():
+    import psutil
     result=[]
-    for pid in Path(f'/proc/{os.getpid()}/task/{os.getpid()}/children').read_text().split():
-        try:cmd=(Path('/proc')/pid/'cmdline').read_bytes()
-        except FileNotFoundError:continue
-        if b'gateway_worker.py' in cmd or b'/bridge_poc' in cmd:result.append(int(pid))
+    # HA OS 内核不一定提供 /proc/<pid>/task/<tid>/children。
+    # 按父子关系遍历，仍检查真正的 SDK 所有者，并包含子线程派生的进程。
+    for process in psutil.Process().children(recursive=True):
+        try:cmd=' '.join(process.cmdline())
+        except psutil.NoSuchProcess:continue
+        if 'gateway_worker.py' in cmd or '/bridge_poc' in cmd:result.append(process.pid)
     return result
 
 

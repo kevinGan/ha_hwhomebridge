@@ -245,7 +245,7 @@ class PublicRoleCompositionTests(unittest.TestCase):
             key: value for key, value in transport.data[entity].items() if key in ("state", "attributes")}))))
         router.action_dispatcher = RecordingDispatcher()
         self.assertTrue(router.route_action(primary.sn, {"brightness": 50}))
-        self.assertEqual(router.action_dispatcher.calls[-1], ("light", "turn_on", "light.alpha", {"brightness": 127}))
+        self.assertEqual(router.action_dispatcher.calls[-1], ("light", "turn_on", "light.alpha", {"brightness": 128}))
         self.assertEqual(json.loads(router.get_char_state(primary.sn, "cct")), {"colorTemperature": 4000})
         router.write("fan", "fan", {"gear": 2})
         self.assertTrue(all(call[2] == "fan.alpha" for call in transport.calls))
